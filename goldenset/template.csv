@@ -1,0 +1,4 @@
+id,source,raw_address,district_field,province_field,department_field,expected_street_type,expected_street_name,expected_number,expected_block,expected_lot,expected_urbanization,expected_ubigeo,lat_verified,lng_verified,verification_method,verified_by,split,notes
+EX-001,example,"Clle. Los Sáuces #245, Ate",,,,CALLE,LOS SAUCES,245,,,,150103,,,,,dev,fila de ejemplo: reemplazar por datos reales o sintéticos
+EX-002,example,"Calle 5 Mz A Lt 3 Urb Los Rosales SJL",,,,CALLE,5,,A,3,URBANIZACION LOS ROSALES,150132,,,,,dev,fila de ejemplo
+EX-003,example,"Av. Arequipa s/n",Miraflores,Lima,Lima,AVENIDA,AREQUIPA,S/N,,,,150122,,,,,dev,fila de ejemplo

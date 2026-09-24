@@ -1,0 +1,612 @@
+{
+ "cases": [
+  {
+   "name": "sauces_variante_1_abreviatura_y_numero",
+   "input": {
+    "address": "Clle. Los Sáuces #245, Ate"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "LOS SAUCES",
+    "number": "245",
+    "normalized": "CALLE LOS SAUCES 245",
+    "ubigeo": "150103",
+    "district": "ATE",
+    "location_source": "TEXT",
+    "in_scope": "true"
+   },
+   "flags_contain": [
+    "ABBREVIATION_EXPANDED"
+   ],
+   "flags_absent": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "sauces_variante_2_c_punto",
+   "input": {
+    "address": "C. Los Sauces 245 Ate"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "LOS SAUCES",
+    "number": "245",
+    "ubigeo": "150103"
+   },
+   "flags_contain": [
+    "GUARDED_C_AS_CALLE"
+   ]
+  },
+  {
+   "name": "sauces_variante_3_typo_no_se_corrige",
+   "input": {
+    "address": "Calle Los Saucez 245 - Ate"
+   },
+   "expect": {
+    "street_name": "LOS SAUCEZ",
+    "number": "245",
+    "ubigeo": "150103"
+   }
+  },
+  {
+   "name": "campos_separados",
+   "input": {
+    "address": "Av. Los Sauces 245",
+    "district": "Ate",
+    "province": "Lima",
+    "department": "Lima"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "LOS SAUCES",
+    "number": "245",
+    "ubigeo": "150103",
+    "location_source": "FIELD"
+   }
+  },
+  {
+   "name": "todo_concatenado",
+   "input": {
+    "address": "Av. Los Sauces 245, Ate, Lima, Lima"
+   },
+   "expect": {
+    "street_name": "LOS SAUCES",
+    "number": "245",
+    "ubigeo": "150103",
+    "location_source": "TEXT"
+   }
+  },
+  {
+   "name": "mixto_provincia_en_campo_distrito_en_texto",
+   "input": {
+    "address": "Av. Los Sauces 245 - Ate",
+    "province": "Lima"
+   },
+   "expect": {
+    "ubigeo": "150103",
+    "province": "LIMA",
+    "location_source": "TEXT"
+   }
+  },
+  {
+   "name": "avenida_con_nombre_largo",
+   "input": {
+    "address": "Av. Javier Prado Este 1234, San Isidro"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "JAVIER PRADO ESTE",
+    "number": "1234",
+    "ubigeo": "150131"
+   }
+  },
+  {
+   "name": "numero_que_es_parte_del_nombre_de_calle",
+   "input": {
+    "address": "Jr. 2 de Mayo 340 Cercado de Lima"
+   },
+   "expect": {
+    "street_type": "JIRON",
+    "street_name": "2 DE MAYO",
+    "number": "340",
+    "ubigeo": "150101"
+   }
+  },
+  {
+   "name": "calle_numerada_con_manzana_lote_y_urbanizacion",
+   "input": {
+    "address": "Calle 5 Mz A Lt 3 Urb Los Rosales SJL"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "5",
+    "number": "",
+    "block": "A",
+    "lot": "3",
+    "urbanization": "URBANIZACION LOS ROSALES",
+    "ubigeo": "150132"
+   },
+   "flags_absent": [
+    "NO_NUMBER"
+   ]
+  },
+  {
+   "name": "asentamiento_humano_sin_calle",
+   "input": {
+    "address": "AA.HH. Villa Solidaria Mz B Lt 12, Villa El Salvador"
+   },
+   "expect": {
+    "street_type": "",
+    "street_name": "",
+    "block": "B",
+    "lot": "12",
+    "urbanization": "ASENTAMIENTO HUMANO VILLA SOLIDARIA",
+    "ubigeo": "150142"
+   },
+   "flags_contain": [
+    "NO_STREET_TYPE"
+   ]
+  },
+  {
+   "name": "pasaje_con_interior",
+   "input": {
+    "address": "Psje. Los Pinos 123 Int 4 Comas"
+   },
+   "expect": {
+    "street_type": "PASAJE",
+    "street_name": "LOS PINOS",
+    "number": "123",
+    "interior": "INT 4",
+    "ubigeo": "150110"
+   }
+  },
+  {
+   "name": "sin_numero",
+   "input": {
+    "address": "Av. Arequipa s/n Miraflores"
+   },
+   "expect": {
+    "street_name": "AREQUIPA",
+    "number": "S/N",
+    "ubigeo": "150122"
+   },
+   "flags_contain": [
+    "NO_NUMBER"
+   ]
+  },
+  {
+   "name": "conflicto_distrito_campo_vs_texto",
+   "input": {
+    "address": "Av. Benavides 100, Surco",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "ubigeo": "150122",
+    "location_source": "FIELD"
+   },
+   "flags_contain": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "calle_con_nombre_de_distrito_no_se_consume",
+   "input": {
+    "address": "Av. La Molina"
+   },
+   "expect": {
+    "street_name": "LA MOLINA",
+    "ubigeo": "",
+    "location_source": "NONE"
+   },
+   "flags_contain": [
+    "LOCATION_SUFFIX_SKIPPED",
+    "LOCATION_UNKNOWN"
+   ]
+  },
+  {
+   "name": "calle_con_nombre_de_distrito_antes_del_distrito_real",
+   "input": {
+    "address": "Jr. Santa Rosa 245 Rimac"
+   },
+   "expect": {
+    "street_name": "SANTA ROSA",
+    "number": "245",
+    "ubigeo": "150128"
+   }
+  },
+  {
+   "name": "ubigeo_explicito",
+   "input": {
+    "address": "Calle Las Flores 10",
+    "ubigeo": "150103"
+   },
+   "expect": {
+    "ubigeo": "150103",
+    "district": "ATE",
+    "location_source": "UBIGEO"
+   }
+  },
+  {
+   "name": "ubigeo_invalido",
+   "input": {
+    "address": "Calle Las Flores 10",
+    "ubigeo": "999999"
+   },
+   "expect": {
+    "ubigeo": "",
+    "location_source": "NONE"
+   },
+   "flags_contain": [
+    "INVALID_UBIGEO"
+   ]
+  },
+  {
+   "name": "lima_a_secas_es_ambiguo",
+   "input": {
+    "address": "Av. Brasil 2000, Lima"
+   },
+   "expect": {
+    "street_name": "BRASIL",
+    "number": "2000",
+    "ubigeo": "",
+    "province": "LIMA",
+    "zone": "LIMA_METRO",
+    "in_scope": "true"
+   },
+   "flags_contain": [
+    "AMBIGUOUS_LIMA"
+   ]
+  },
+  {
+   "name": "callao_fuera_de_cobertura",
+   "input": {
+    "address": "Av. Argentina 1000, Ventanilla"
+   },
+   "expect": {
+    "ubigeo": "070106",
+    "zone": "CALLAO",
+    "in_scope": "false"
+   }
+  },
+  {
+   "name": "magdalena_es_ambiguo",
+   "input": {
+    "address": "Av. Brasil 1234 Magdalena"
+   },
+   "expect": {
+    "ubigeo": "",
+    "location_source": "NONE"
+   },
+   "flags_contain": [
+    "AMBIGUOUS_DISTRICT",
+    "LOCATION_SUFFIX_UNRESOLVED"
+   ]
+  },
+  {
+   "name": "alias_debil_surco",
+   "input": {
+    "address": "Av. Caminos del Inca 500 Surco"
+   },
+   "expect": {
+    "ubigeo": "150140"
+   },
+   "flags_contain": [
+    "WEAK_DISTRICT_ALIAS"
+   ]
+  },
+  {
+   "name": "mojibake",
+   "input": {
+    "address": "Av. CaÃ±ete 500, Comas"
+   },
+   "expect": {
+    "street_name": "CAÑETE",
+    "number": "500",
+    "ubigeo": "150110"
+   }
+  },
+  {
+   "name": "tokens_pegados",
+   "input": {
+    "address": "Av.Javier Prado 123 MzA Lt5, La Molina"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "JAVIER PRADO",
+    "number": "123",
+    "block": "A",
+    "lot": "5",
+    "ubigeo": "150114"
+   }
+  },
+  {
+   "name": "titulo_abreviado",
+   "input": {
+    "address": "Jr. Sta Rosa 245 Rimac"
+   },
+   "expect": {
+    "street_name": "SANTA ROSA",
+    "number": "245"
+   }
+  },
+  {
+   "name": "etapa_ordinal_en_urbanizacion",
+   "input": {
+    "address": "Urb. Las Palmeras 2da Etapa Mz F Lt 8, Comas"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION LAS PALMERAS 2 ETAPA",
+    "block": "F",
+    "lot": "8",
+    "ubigeo": "150110"
+   }
+  },
+  {
+   "name": "referencia_entre_parentesis",
+   "input": {
+    "address": "Av. Arequipa 1234 (frente al parque), Lince"
+   },
+   "expect": {
+    "street_name": "AREQUIPA",
+    "number": "1234",
+    "reference": "FRENTE AL PARQUE",
+    "ubigeo": "150116"
+   }
+  },
+  {
+   "name": "referencia_en_texto_libre",
+   "input": {
+    "address": "Av. Arequipa 1234 Lince cerca de la plaza"
+   },
+   "expect": {
+    "street_name": "AREQUIPA",
+    "number": "1234",
+    "reference": "CERCA DE LA PLAZA",
+    "ubigeo": "150116"
+   }
+  },
+  {
+   "name": "numero_con_letra_pegada_con_guion",
+   "input": {
+    "address": "Calle Los Sauces 245-A, Ate"
+   },
+   "expect": {
+    "street_name": "LOS SAUCES",
+    "number": "245A",
+    "ubigeo": "150103"
+   }
+  },
+  {
+   "name": "numero_con_letra_separada",
+   "input": {
+    "address": "Calle Los Sauces 245 A Ate"
+   },
+   "expect": {
+    "street_name": "LOS SAUCES",
+    "number": "245A",
+    "ubigeo": "150103"
+   }
+  },
+  {
+   "name": "marcador_de_numero_nro_grado",
+   "input": {
+    "address": "Av. Universitaria Nº 1801, San Miguel"
+   },
+   "expect": {
+    "street_name": "UNIVERSITARIA",
+    "number": "1801",
+    "ubigeo": "150136"
+   }
+  },
+  {
+   "name": "direccion_vacia",
+   "input": {
+    "address": "   "
+   },
+   "expect": {
+    "normalized": ""
+   },
+   "flags_contain": [
+    "EMPTY_ADDRESS"
+   ]
+  },
+  {
+   "name": "via_despues_de_urbanizacion_y_mz_lt",
+   "input": {
+    "address": "Urb. Los Rosales Mz. B Lote 12 Calle 5"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "5",
+    "number": "",
+    "block": "B",
+    "lot": "12",
+    "urbanization": "URBANIZACION LOS ROSALES",
+    "reference": "",
+    "normalized": "CALLE 5 MZ B LT 12 URBANIZACION LOS ROSALES"
+   },
+   "flags_contain": [
+    "ABBREVIATION_EXPANDED"
+   ],
+   "flags_absent": [
+    "NO_STREET_TYPE",
+    "TRAILING_TEXT_MOVED_TO_REFERENCE"
+   ]
+  },
+  {
+   "name": "via_despues_de_urbanizacion_con_numero",
+   "input": {
+    "address": "Urb. Santa Patricia Av. La Molina 1250",
+    "district": "La Molina"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "LA MOLINA",
+    "number": "1250",
+    "urbanization": "URBANIZACION SANTA PATRICIA",
+    "ubigeo": "150114"
+   },
+   "flags_absent": [
+    "NO_STREET_TYPE"
+   ]
+  },
+  {
+   "name": "tipo_de_via_al_final_del_nombre_de_urbanizacion_no_corta",
+   "input": {
+    "address": "Mz D Lt 4 Urb. Villa Parque",
+    "district": "Ate"
+   },
+   "expect": {
+    "street_type": "",
+    "urbanization": "URBANIZACION VILLA PARQUE"
+   },
+   "flags_contain": [
+    "NO_STREET_TYPE"
+   ]
+  },
+  {
+   "name": "ubigeo_gana_pero_marca_conflicto_con_campo_distrito",
+   "input": {
+    "address": "Av. Javier Prado Este 4200",
+    "district": "Miraflores",
+    "ubigeo": "150140"
+   },
+   "expect": {
+    "ubigeo": "150140",
+    "district": "SANTIAGO DE SURCO",
+    "location_source": "UBIGEO"
+   },
+   "flags_contain": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "ubigeo_y_campo_distrito_coinciden",
+   "input": {
+    "address": "Av. Javier Prado Este 4200",
+    "district": "Surco",
+    "ubigeo": "150140"
+   },
+   "expect": {
+    "ubigeo": "150140",
+    "location_source": "UBIGEO"
+   },
+   "flags_absent": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "distrito_dentro_del_nombre_del_aahh_solo_se_marca",
+   "input": {
+    "address": "AAHH Villa El Salvador Sector 3 Grupo 15 Mz C Lt 8"
+   },
+   "expect": {
+    "block": "C",
+    "lot": "8",
+    "urbanization": "ASENTAMIENTO HUMANO VILLA EL SALVADOR SECTOR 3 GRUPO 15",
+    "ubigeo": "",
+    "location_source": "NONE"
+   },
+   "flags_contain": [
+    "DISTRICT_NAME_IN_URBANIZATION",
+    "LOCATION_UNKNOWN"
+   ]
+  },
+  {
+   "name": "distrito_en_urbanizacion_no_se_marca_si_ya_hay_ubicacion",
+   "input": {
+    "address": "Urb. San Borja Norte Calle Las Begonias 150",
+    "district": "San Borja"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "LAS BEGONIAS",
+    "number": "150",
+    "ubigeo": "150130"
+   },
+   "flags_absent": [
+    "DISTRICT_NAME_IN_URBANIZATION"
+   ]
+  },
+  {
+   "name": "nombre_repetido_en_el_pais_elige_zona_activa",
+   "input": {
+    "address": "Av. Larco 345 Miraflores"
+   },
+   "expect": {
+    "ubigeo": "150122",
+    "in_scope": "true"
+   },
+   "flags_contain": [
+    "DISTRICT_BY_ACTIVE_ZONE"
+   ]
+  },
+  {
+   "name": "nombre_repetido_con_departamento_explicito",
+   "input": {
+    "address": "Calle Mercaderes 100, Miraflores, Arequipa"
+   },
+   "expect": {
+    "street_name": "MERCADERES",
+    "ubigeo": "040110",
+    "in_scope": "false"
+   },
+   "flags_absent": [
+    "DISTRICT_BY_ACTIVE_ZONE"
+   ]
+  },
+  {
+   "name": "distrito_de_lima_que_es_provincia_en_otro_departamento",
+   "input": {
+    "address": "Av. Universitaria 1801 San Miguel"
+   },
+   "expect": {
+    "ubigeo": "150136",
+    "province": "LIMA"
+   },
+   "flags_contain": [
+    "DISTRICT_BY_ACTIVE_ZONE"
+   ]
+  },
+  {
+   "name": "distrito_con_provincia_fuera_de_cobertura",
+   "input": {
+    "address": "Av. Grau 300 San Miguel Puno"
+   },
+   "expect": {
+    "ubigeo": "211105",
+    "in_scope": "false"
+   }
+  },
+  {
+   "name": "calle_con_nombre_de_departamento_no_es_ubicacion",
+   "input": {
+    "address": "Av. Arequipa, Lima"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "AREQUIPA",
+    "province": "LIMA"
+   },
+   "flags_absent": [
+    "LOCATION_SUFFIX_SKIPPED",
+    "LOCATION_INCONSISTENT"
+   ]
+  },
+  {
+   "name": "alias_debil_en_campo_con_homonimo_en_otra_provincia",
+   "input": {
+    "address": "Calle Los Sauces 245",
+    "district": "Surco"
+   },
+   "expect": {
+    "ubigeo": "150140",
+    "location_source": "FIELD"
+   },
+   "flags_contain": [
+    "WEAK_DISTRICT_ALIAS",
+    "DISTRICT_BY_ACTIVE_ZONE"
+   ]
+  }
+ ]
+}

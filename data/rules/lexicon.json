@@ -1,0 +1,195 @@
+{
+ "version": "0.1.0",
+ "street_types": {
+  "CALLE": [
+   "C",
+   "CL",
+   "CLL",
+   "CLLE",
+   "CA",
+   "CAL",
+   "CALLE"
+  ],
+  "AVENIDA": [
+   "AV",
+   "AVDA",
+   "AVE",
+   "AVENIDA"
+  ],
+  "JIRON": [
+   "JR",
+   "JRN",
+   "JIRON"
+  ],
+  "PASAJE": [
+   "PSJ",
+   "PSJE",
+   "PJE",
+   "PASAJE"
+  ],
+  "ALAMEDA": [
+   "ALM",
+   "ALAMEDA"
+  ],
+  "MALECON": [
+   "MLCN",
+   "MALECON"
+  ],
+  "PROLONGACION": [
+   "PROL",
+   "PROLONG",
+   "PROLONGACION"
+  ],
+  "CARRETERA": [
+   "CARR",
+   "CARRETERA"
+  ],
+  "AUTOPISTA": [
+   "AUTOP",
+   "AUTOPISTA"
+  ],
+  "OVALO": [
+   "OV",
+   "OVALO"
+  ],
+  "PLAZA": [
+   "PZA",
+   "PLAZA"
+  ],
+  "PARQUE": [
+   "PQUE",
+   "PARQUE"
+  ],
+  "PASEO": [
+   "PASEO"
+  ],
+  "CAMINO": [
+   "CAM",
+   "CAMINO"
+  ]
+ },
+ "unit_markers": {
+  "MZ": [
+   "MZ",
+   "MANZ",
+   "MANZANA",
+   "MZNA"
+  ],
+  "LT": [
+   "LT",
+   "LTE",
+   "LOTE"
+  ],
+  "INT": [
+   "INT",
+   "INTERIOR"
+  ],
+  "DPTO": [
+   "DPTO",
+   "DEPTO",
+   "DEP",
+   "DEPARTAMENTO"
+  ],
+  "OF": [
+   "OF",
+   "OFIC",
+   "OFICINA"
+  ],
+  "PISO": [
+   "PISO"
+  ],
+  "TDA": [
+   "TDA",
+   "TIENDA"
+  ],
+  "STAND": [
+   "STAND",
+   "PUESTO"
+  ]
+ },
+ "urbanization_markers": {
+  "URBANIZACION": [
+   "URB",
+   "URBANIZACION"
+  ],
+  "ASENTAMIENTO HUMANO": [
+   "AAHH"
+  ],
+  "PUEBLO JOVEN": [
+   "PJ"
+  ],
+  "COOPERATIVA": [
+   "COOP",
+   "COOPERATIVA"
+  ],
+  "ASOCIACION": [
+   "ASOC",
+   "ASOCIACION"
+  ],
+  "RESIDENCIAL": [
+   "RES",
+   "RESIDENCIAL"
+  ],
+  "CONDOMINIO": [
+   "COND",
+   "CONDOMINIO"
+  ],
+  "SECTOR": [
+   "SECTOR"
+  ],
+  "ZONA": [
+   "ZONA"
+  ],
+  "GRUPO": [
+   "GRUPO"
+  ]
+ },
+ "phrases": {
+  "ASENTAMIENTO HUMANO": "AAHH",
+  "PUEBLO JOVEN": "PJ",
+  "SIN NUMERO": "SINNUMERO",
+  "SIN NRO": "SINNUMERO"
+ },
+ "titles": {
+  "STA": "SANTA",
+  "STO": "SANTO",
+  "SN": "SAN",
+  "GRAL": "GENERAL",
+  "MCAL": "MARISCAL",
+  "ALMTE": "ALMIRANTE",
+  "CDTE": "COMANDANTE",
+  "CAP": "CAPITAN",
+  "CRL": "CORONEL",
+  "TTE": "TENIENTE",
+  "DR": "DOCTOR",
+  "ING": "INGENIERO",
+  "PROF": "PROFESOR"
+ },
+ "reference_markers": [
+  "REF",
+  "REFERENCIA",
+  "FRENTE",
+  "CERCA",
+  "ALTURA",
+  "ESQUINA",
+  "ESQ",
+  "COSTADO",
+  "ATRAS",
+  "DETRAS",
+  "LADO"
+ ],
+ "ordinal_words": {
+  "PRIMERA": "1",
+  "PRIMERO": "1",
+  "PRIMER": "1",
+  "SEGUNDA": "2",
+  "SEGUNDO": "2",
+  "TERCERA": "3",
+  "TERCERO": "3",
+  "TERCER": "3",
+  "CUARTA": "4",
+  "CUARTO": "4",
+  "QUINTA": "5",
+  "QUINTO": "5"
+ }
+}

@@ -1,0 +1,485 @@
+{
+ "_meta": {
+  "purpose": "Datos propios que cmd/catalogbuild mezcla con el Excel del INEI: alias, nombres con tildes y zonas. El catálogo que usa el servicio es ubigeos.json.",
+  "coverage": "Lima Metropolitana (43 distritos) y Provincia Constitucional del Callao (7 distritos).",
+  "todo": "Tras editar este archivo, correr make catalog. Todo código de aquí debe existir en el Excel.",
+  "format": "weak_aliases son nombres ambiguos: resuelven con flag WEAK_DISTRICT_ALIAS, o AMBIGUOUS_DISTRICT si apuntan a más de un distrito."
+ },
+ "entries": [
+  {
+   "code": "150101",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "LIMA",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "CERCADO",
+    "CERCADO DE LIMA",
+    "LIMA CERCADO"
+   ],
+   "weak_aliases": []
+  },
+  {
+   "code": "150102",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "ANCÓN",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150103",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "ATE",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150104",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "BARRANCO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150105",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "BREÑA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150106",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "CARABAYLLO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150107",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "CHACLACAYO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150108",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "CHORRILLOS",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150109",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "CIENEGUILLA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150110",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "COMAS",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150111",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "EL AGUSTINO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150112",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "INDEPENDENCIA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150113",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "JESÚS MARÍA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150114",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "LA MOLINA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150115",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "LA VICTORIA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150116",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "LINCE",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150117",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "LOS OLIVOS",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150118",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "LURIGANCHO",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "CHOSICA",
+    "LURIGANCHO CHOSICA"
+   ],
+   "weak_aliases": []
+  },
+  {
+   "code": "150119",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "LURÍN",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150120",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "MAGDALENA DEL MAR",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": [
+    "MAGDALENA"
+   ]
+  },
+  {
+   "code": "150121",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "PUEBLO LIBRE",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "MAGDALENA VIEJA"
+   ],
+   "weak_aliases": [
+    "MAGDALENA"
+   ]
+  },
+  {
+   "code": "150122",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "MIRAFLORES",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150123",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "PACHACÁMAC",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150124",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "PUCUSANA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150125",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "PUENTE PIEDRA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150126",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "PUNTA HERMOSA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150127",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "PUNTA NEGRA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150128",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "RÍMAC",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150129",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN BARTOLO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150130",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN BORJA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150131",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN ISIDRO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150132",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN JUAN DE LURIGANCHO",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "SJL"
+   ],
+   "weak_aliases": []
+  },
+  {
+   "code": "150133",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN JUAN DE MIRAFLORES",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "SJM"
+   ],
+   "weak_aliases": []
+  },
+  {
+   "code": "150134",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN LUIS",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150135",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN MARTÍN DE PORRES",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "SMP"
+   ],
+   "weak_aliases": []
+  },
+  {
+   "code": "150136",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SAN MIGUEL",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150137",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SANTA ANITA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150138",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SANTA MARÍA DEL MAR",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150139",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SANTA ROSA",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150140",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SANTIAGO DE SURCO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": [
+    "SURCO"
+   ]
+  },
+  {
+   "code": "150141",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "SURQUILLO",
+   "zone": "LIMA_METRO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "150142",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "VILLA EL SALVADOR",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "VES"
+   ],
+   "weak_aliases": []
+  },
+  {
+   "code": "150143",
+   "department": "LIMA",
+   "province": "LIMA",
+   "district": "VILLA MARÍA DEL TRIUNFO",
+   "zone": "LIMA_METRO",
+   "aliases": [
+    "VMT"
+   ],
+   "weak_aliases": []
+  },
+  {
+   "code": "070101",
+   "department": "CALLAO",
+   "province": "CALLAO",
+   "district": "CALLAO",
+   "zone": "CALLAO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "070102",
+   "department": "CALLAO",
+   "province": "CALLAO",
+   "district": "BELLAVISTA",
+   "zone": "CALLAO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "070103",
+   "department": "CALLAO",
+   "province": "CALLAO",
+   "district": "CARMEN DE LA LEGUA REYNOSO",
+   "zone": "CALLAO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "070104",
+   "department": "CALLAO",
+   "province": "CALLAO",
+   "district": "LA PERLA",
+   "zone": "CALLAO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "070105",
+   "department": "CALLAO",
+   "province": "CALLAO",
+   "district": "LA PUNTA",
+   "zone": "CALLAO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "070106",
+   "department": "CALLAO",
+   "province": "CALLAO",
+   "district": "VENTANILLA",
+   "zone": "CALLAO",
+   "aliases": [],
+   "weak_aliases": []
+  },
+  {
+   "code": "070107",
+   "department": "CALLAO",
+   "province": "CALLAO",
+   "district": "MI PERÚ",
+   "zone": "CALLAO",
+   "aliases": [],
+   "weak_aliases": []
+  }
+ ]
+}

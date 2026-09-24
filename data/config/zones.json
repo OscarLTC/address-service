@@ -1,0 +1,30 @@
+{
+ "zones": {
+  "LIMA_METRO": "active",
+  "CALLAO": "off",
+  "LIMA_PROVINCIAS": "off",
+  "AMAZONAS": "off",
+  "ANCASH": "off",
+  "APURIMAC": "off",
+  "AREQUIPA": "off",
+  "AYACUCHO": "off",
+  "CAJAMARCA": "off",
+  "CUSCO": "off",
+  "HUANCAVELICA": "off",
+  "HUANUCO": "off",
+  "ICA": "off",
+  "JUNIN": "off",
+  "LAMBAYEQUE": "off",
+  "LA_LIBERTAD": "off",
+  "LORETO": "off",
+  "MADRE_DE_DIOS": "off",
+  "MOQUEGUA": "off",
+  "PASCO": "off",
+  "PIURA": "off",
+  "PUNO": "off",
+  "SAN_MARTIN": "off",
+  "TACNA": "off",
+  "TUMBES": "off",
+  "UCAYALI": "off"
+ }
+}
