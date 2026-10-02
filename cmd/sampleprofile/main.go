@@ -33,6 +33,7 @@ func main() {
 	in := flag.String("in", "data/private/emsd_muestra.csv", "muestra exportada de EMS-D")
 	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas)")
 	examples := flag.Int("examples", 30, "ejemplos a mostrar por grupo")
+	outCSV := flag.String("out-csv", "", "si se indica, escribe la propuesta del normalizador por fila (solo dentro de data/private/)")
 	flag.Parse()
 
 	cat, err := catalog.Load(filepath.Join(*dataDir, "catalog", "ubigeos.json"))
@@ -78,6 +79,19 @@ func main() {
 		locF[compare(o.withF.Location.Ubigeo, s.ubigeo)]++
 		locT[compare(o.textOnly.Location.Ubigeo, s.ubigeo)]++
 		shape[shapeOf(o.withF.Components)]++
+	}
+
+	if *outCSV != "" {
+		if !strings.HasPrefix(filepath.ToSlash(filepath.Clean(*outCSV)), "data/private/") {
+			log.Fatalf("-out-csv debe quedar dentro de data/private/: la salida contiene direcciones de clientes")
+		}
+		results := make([]normalizer.Result, len(all))
+		for i, o := range all {
+			results[i] = o.withF
+		}
+		if err := writeProposals(*outCSV, rows, results); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	n := len(all)
@@ -133,6 +147,36 @@ func main() {
 		return has(o.withF.Flags, "TRAILING_TEXT_MOVED_TO_REFERENCE")
 	})
 	show("Muestra general", func(o outcome) bool { return true })
+}
+
+// writeProposals escribe, por fila de la muestra, lo que propone el normalizador
+// (llamado con los campos de ubicación). Es la base de la planilla de etiquetado.
+func writeProposals(path string, rows []sample, results []normalizer.Result) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	w := csv.NewWriter(f)
+	head := []string{"id_muestra", "cuenta", "direccion", "numero", "referencia", "distrito", "provincia",
+		"departamento", "ubigeo", "p_tipo_via", "p_nombre_via", "p_numero", "p_interior", "p_mz", "p_lt",
+		"p_urbanizacion", "p_referencia", "p_ubigeo", "p_normalizada", "p_flags"}
+	if err := w.Write(head); err != nil {
+		return err
+	}
+	for i, s := range rows {
+		r := results[i]
+		c := r.Components
+		if err := w.Write([]string{s.id, s.cuenta, s.direccion, s.numero, s.referencia, s.distrito, s.provincia,
+			s.departamento, s.ubigeo, c.StreetType, c.StreetName, c.Number, c.Interior, c.Block, c.Lot,
+			c.Urbanization, c.Reference, r.Location.Ubigeo, r.Normalized, strings.Join(r.Flags, " ")}); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func suffix(num string) string {
