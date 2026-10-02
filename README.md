@@ -11,7 +11,7 @@ Servicio para normalizar y resolver direcciones peruanas. Este repositorio es el
 Requiere Go 1.22 o superior. No hay dependencias externas.
 
 ```bash
-make test     # 47 casos de normalización + idempotencia + catálogo + geometría
+make test     # 60 casos de normalización + idempotencia + catálogo + geometría
 make bench    # latencia del normalizador
 make run      # servidor en :8080
 make catalog  # regenera data/catalog/ubigeos.json desde el Excel del INEI
@@ -61,7 +61,7 @@ docs/                    plan, guía de arranque y ADRs
 ## Estado
 
 - Hecho: normalización (limpieza, tokenización, abreviaturas por posición, parseo de vía/número/Mz/Lt/interior/urbanización/referencia), detección de departamento/provincia/distrito con precedencias y ambigüedades, cobertura por zona, `/v1/normalize`.
-- Hecho: límites distritales de Lima y Callao desde OSM; dataset de oro v1 (pistas OSM y sintética, 2,463 filas, test congelado) y evaluador. Con `normalizer/0.4.0` la métrica G1 da 99.2 % en test, con 0 ubigeos equivocados. **No es la exactitud real**: el ruido es sintético y no hay casos con Mz/Lt ni AA.HH. (ver `goldenset/README.md`).
-- Falta (siguiente): muestra real de direcciones (pista C), casos sintéticos con Mz/Lt y urbanización, ingesta de calles al modelo de datos (Fase 2), snapshot en RAM, `/v1/geocode`, admin con mapa.
+- Hecho: límites distritales de Lima y Callao desde OSM; dataset de oro de calles (`golden_v1.csv`, 2,463 filas) y de Mz/Lt con urbanizaciones y AA.HH. reales de OSM (`golden_mzlt_v1.csv`, 1,014 filas), con test congelado; evaluador. Con `normalizer/0.5.0` la métrica G1 da 99.2 % en test, con 0 ubigeos equivocados y 100 % de idempotencia. **No es la exactitud real**: el ruido es sintético (ver `goldenset/README.md`).
+- Falta (siguiente): muestra real de direcciones (pista C), ingesta de calles al modelo de datos (Fase 2), snapshot en RAM, `/v1/geocode`, admin con mapa.
 - Catálogo: nacional (INEI 2022, 1891 distritos). Falta el distrito 1892, creado después; se agrega en `ubigeos_seed.json` y se corre `make catalog`. Solo `LIMA_METRO` está activa en `data/config/zones.json`.
 - Nombres repetidos en el país (Miraflores, San Miguel, Surco...): si exactamente uno cae en una zona activa se elige ese, con el flag `DISTRICT_BY_ACTIVE_ZONE`. Activar más zonas puede volver ambiguos nombres que hoy se resuelven.

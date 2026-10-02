@@ -12,7 +12,7 @@ import (
 )
 
 // Version identifica el conjunto de reglas del código. Súbela al cambiar el comportamiento.
-const Version = "0.4.0"
+const Version = "0.5.0"
 
 // Request es la entrada. Todos los campos de ubicación son opcionales.
 type Request struct {
@@ -90,10 +90,12 @@ var (
 	reSN       = regexp.MustCompile(`\bS\s*/\s*N\b`)
 	reNroMark  = regexp.MustCompile(`#|\bN[°º]\.?|\bNRO\b\.?|\bNUM(?:ERO)?\b\.?`)
 	reAAHH     = regexp.MustCompile(`\bA\.?\s?A\.?\s?H\.?\s?H\b\.?`)
+	reAH       = regexp.MustCompile(`\bA\.\s?H\.`) // "A.H." solo con puntos: "A H" suelto es ambiguo
+	reSep      = regexp.MustCompile(`[,;]|\s-+\s?|-+\s`)
 	rePJ       = regexp.MustCompile(`\bP\.\s?J\b\.?`)
 	reNumLetHy = regexp.MustCompile(`(\d)-([A-Z])\b`)
 	rePunct    = regexp.MustCompile(`[^A-Z0-9Ñ\s]`)
-	reGlueMz   = regexp.MustCompile(`^MZ([A-Z])$`)
+	reGlueMz   = regexp.MustCompile(`^MZ([A-Z]\d?|\d+)$`)
 	reGlue     = regexp.MustCompile(`^(LT|INT|DPTO|OF|PISO|CALLE|CL|CLL|AV|JR|PSJE|PJE)(\d+[A-Z]?)$`)
 	reNumber   = regexp.MustCompile(`^\d+[A-Z]?$`)
 	reOrdinal  = regexp.MustCompile(`^(\d+)(RA|ERA|ER|DA|DO|TA|TO|MA|VA|NA|AVO)$`)
@@ -124,7 +126,7 @@ func (n *Normalizer) Normalize(req Request) Result {
 	res := Result{Raw: req.Address, Version: n.VersionString()}
 	flags := &flagSet{}
 
-	tokens, refs := n.tokenize(req.Address)
+	tokens, sepBefore, refs := n.tokenize(req.Address)
 	if len(tokens) == 0 {
 		flags.add("EMPTY_ADDRESS")
 	}
@@ -133,12 +135,17 @@ func (n *Normalizer) Normalize(req Request) Result {
 	tokens, tail = n.cutReference(tokens)
 	refs = append(refs, tail...)
 
-	suffix, rest := n.scanSuffix(tokens)
+	suffix, rest := n.scanSuffix(tokens, sepBefore)
 	sres := n.resolveNames(suffix, areaContext{province: txt.Key(req.Province), department: txt.Key(req.Department)})
 	switch {
 	case len(suffix) == 0:
 	case len(rest) == 0 || (len(rest) == 1 && n.isStructural(rest[0])):
 		flags.add("LOCATION_SUFFIX_SKIPPED")
+		suffix, sres = nil, suffixResult{}
+	case districtGiven(req) && !sepBefore[len(rest)]:
+		// El cliente ya dio el distrito y el texto no separa el sufijo con coma o
+		// guion: es más probable que sea el final de un nombre ("Urb. Nuevo Lurín").
+		flags.add("DISTRICT_NAME_IN_TEXT")
 		suffix, sres = nil, suffixResult{}
 	case !sres.OK:
 		flags.add("LOCATION_SUFFIX_UNRESOLVED")
@@ -166,8 +173,19 @@ func (n *Normalizer) Normalize(req Request) Result {
 	return res
 }
 
+// districtGiven indica si la petición trae el distrito en un campo o por ubigeo.
+func districtGiven(req Request) bool {
+	return strings.TrimSpace(req.District) != "" || strings.TrimSpace(req.Ubigeo) != ""
+}
+
+// sepMark reemplaza comas, punto y coma y guiones separadores durante la limpieza;
+// solo letras, para sobrevivir a la eliminación de puntuación.
+const sepMark = "QSEPQ"
+
 // tokenize aplica las capas N0-N2: limpieza, tokenización y separación de pegados.
-func (n *Normalizer) tokenize(raw string) (tokens, refs []string) {
+// sepBefore[i] indica si en el texto original había una coma o un guion separador
+// justo antes de tokens[i]; tiene un elemento más para el final del texto.
+func (n *Normalizer) tokenize(raw string) (tokens []string, sepBefore []bool, refs []string) {
 	s := txt.Fold(txt.FixMojibake(raw), true)
 	for _, m := range reParens.FindAllStringSubmatch(s, -1) {
 		if r := txt.Collapse(rePunct.ReplaceAllString(m[1], " ")); r != "" {
@@ -178,26 +196,48 @@ func (n *Normalizer) tokenize(raw string) (tokens, refs []string) {
 	s = reSN.ReplaceAllString(s, " SINNUMERO ")
 	s = reNroMark.ReplaceAllString(s, " NRO ")
 	s = reAAHH.ReplaceAllString(s, " AAHH ")
+	s = reAH.ReplaceAllString(s, " AAHH ")
 	s = rePJ.ReplaceAllString(s, " PJ ")
 	s = reNumLetHy.ReplaceAllString(s, "$1$2")
+	s = reSep.ReplaceAllString(s, " "+sepMark+" ")
 	s = rePunct.ReplaceAllString(s, " ")
 	s = n.lex.applyPhrases(txt.Collapse(s))
 
-	for _, t := range strings.Fields(s) {
+	sep := false
+	add := func(ts ...string) {
+		for i, t := range ts {
+			tokens = append(tokens, t)
+			sepBefore = append(sepBefore, sep && i == 0)
+		}
+		sep = false
+	}
+	fields := strings.Fields(s)
+	for i, t := range fields {
 		switch {
+		case t == sepMark:
+			sep = true
 		case t == "NRO":
 			continue
+		case t == "MZA" && i+1 < len(fields) && n.isBlockValue(fields[i+1]):
+			// "Mza. J": abreviatura de manzana, no "Mz A" pegado.
+			add("MZ")
 		case reGlueMz.MatchString(t):
 			m := reGlueMz.FindStringSubmatch(t)
-			tokens = append(tokens, "MZ", m[1])
+			add("MZ", m[1])
 		case reGlue.MatchString(t):
 			m := reGlue.FindStringSubmatch(t)
-			tokens = append(tokens, m[1], m[2])
+			add(m[1], m[2])
 		default:
-			tokens = append(tokens, t)
+			add(t)
 		}
 	}
-	return tokens, refs
+	sepBefore = append(sepBefore, sep)
+	return tokens, sepBefore, refs
+}
+
+// isBlockValue indica si el token puede ser el valor de una manzana (J, B1, 12).
+func (n *Normalizer) isBlockValue(t string) bool {
+	return len(t) <= 3 && t != sepMark && !n.isUnit(t) && !n.isUrb(t) && !reGlue.MatchString(t)
 }
 
 // cutReference separa lo que viene después de "frente a", "cerca de", etc.
@@ -294,7 +334,11 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 		case inStreet:
 			street = append(street, tk)
 		case inUrb:
-			urb = append(urb, n.urbToken(tk))
+			next := ""
+			if i+1 < len(tokens) {
+				next = tokens[i+1]
+			}
+			urb = append(urb, n.urbToken(tk, next))
 		case seenUnit:
 			trailing = append(trailing, tk)
 		default:
@@ -328,9 +372,15 @@ func (n *Normalizer) startsLateStreet(tokens []string, i int, streetType string,
 	return ok
 }
 
-func (n *Normalizer) urbToken(tk string) string {
+// groupingWords son las palabras ante las que un ordinal escrito pasa a dígito.
+var groupingWords = map[string]bool{"ETAPA": true, "SECTOR": true, "ZONA": true, "GRUPO": true}
+
+// urbToken normaliza un token del nombre de la urbanización. Un ordinal escrito
+// pasa a dígito solo antes de una palabra de agrupación ("Primera Etapa" -> "1
+// ETAPA"); en un nombre propio se conserva ("Primero de Setiembre", "Quinta Heren").
+func (n *Normalizer) urbToken(tk, next string) string {
 	k := txt.NoEnye(tk)
-	if w, ok := n.lex.ordinals[k]; ok {
+	if w, ok := n.lex.ordinals[k]; ok && groupingWords[next] {
 		return w
 	}
 	if m := reOrdinal.FindStringSubmatch(tk); m != nil {

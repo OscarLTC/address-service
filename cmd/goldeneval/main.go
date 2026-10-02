@@ -1,11 +1,12 @@
 // Comando goldeneval: corre el normalizador sobre el dataset de oro y reporta la
-// exactitud del parseo por campo, la métrica de la compuerta G1 (tipo de vía,
-// nombre, número y distrito correctos a la vez), la idempotencia y dónde falla.
+// exactitud del parseo por campo, la métrica de la compuerta G1 (todos los campos
+// esperados correctos a la vez: vía, número, Mz/Lt, urbanización y ubigeo), la
+// idempotencia y dónde falla.
 //
 // Los ejemplos de fallos se muestran solo de la partición dev: la de test está
 // congelada y solo se reporta en cifras, para no ajustar reglas mirándola.
 //
-//	go run ./cmd/goldeneval -golden goldenset/golden_v1.csv
+//	go run ./cmd/goldeneval -golden goldenset/golden_v1.csv,goldenset/golden_mzlt_v1.csv
 package main
 
 import (
@@ -24,9 +25,6 @@ import (
 
 // fields son los campos comparados, en el orden del reporte.
 var fields = []string{"street_type", "street_name", "number", "block", "lot", "urbanization", "ubigeo"}
-
-// coreFields definen la métrica de la compuerta G1.
-var coreFields = []string{"street_type", "street_name", "number", "ubigeo"}
 
 func expected(r golden.Row, f string) string {
 	switch f {
@@ -84,8 +82,6 @@ func (t *tally) add(okFields map[string]bool) bool {
 		if okFields[f] {
 			t.ok[f]++
 		}
-	}
-	for _, f := range coreFields {
 		core = core && okFields[f]
 	}
 	if core {
@@ -108,7 +104,7 @@ type failure struct {
 }
 
 func main() {
-	goldenPath := flag.String("golden", "goldenset/golden_v1.csv", "dataset de oro")
+	goldenPaths := flag.String("golden", "goldenset/golden_v1.csv,goldenset/golden_mzlt_v1.csv", "datasets de oro, separados por coma")
 	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas)")
 	examples := flag.Int("examples", 25, "ejemplos de fallos de dev a mostrar")
 	minCore := flag.Float64("min-core", 0, "si es > 0, termina con error cuando la métrica G1 de test queda por debajo (en %)")
@@ -127,9 +123,13 @@ func main() {
 		log.Fatalf("zonas: %v", err)
 	}
 	norm := normalizer.New(cat, lex, normalizer.Options{ActiveZones: zones})
-	rows, err := golden.ReadFile(*goldenPath)
-	if err != nil {
-		log.Fatalf("dataset: %v", err)
+	var rows []golden.Row
+	for _, p := range strings.Split(*goldenPaths, ",") {
+		rs, err := golden.ReadFile(strings.TrimSpace(p))
+		if err != nil {
+			log.Fatalf("dataset %s: %v", p, err)
+		}
+		rows = append(rows, rs...)
 	}
 
 	bySplit := map[string]*tally{}
@@ -176,7 +176,7 @@ func main() {
 		get(bySplit, r.Split).add(okFields)
 		get(bySource, r.Split+" / "+r.Source).add(okFields)
 		get(byDistrict, r.ExpectedUbigeo).add(okFields)
-		if r.Source == "synthetic" {
+		if strings.HasPrefix(r.Source, "synthetic") {
 			for _, tag := range strings.Split(r.Notes, ";") {
 				get(byTag, tag).add(okFields)
 			}
@@ -188,8 +188,9 @@ func main() {
 			fails = append(fails, failure{row: r, res: res, diff: diff})
 		}
 
-		// Idempotencia: normalizar el texto ya normalizado no debe cambiarlo.
-		again := norm.Normalize(normalizer.Request{Address: res.Normalized})
+		// Idempotencia: normalizar el texto ya normalizado, con la ubicación ya
+		// detectada (como en las pruebas del normalizador), no debe cambiarlo.
+		again := norm.Normalize(normalizer.Request{Address: res.Normalized, Ubigeo: res.Location.Ubigeo})
 		if again.Normalized != res.Normalized {
 			idemFail++
 			if len(idemExamples) < 5 {
@@ -199,8 +200,8 @@ func main() {
 	}
 
 	fmt.Printf("# Evaluación del normalizador sobre el dataset de oro\n\n")
-	fmt.Printf("- Dataset: `%s` (%d filas)\n- Normalizador: `%s`\n", *goldenPath, len(rows), norm.VersionString())
-	fmt.Printf("- Métrica G1: tipo de vía, nombre, número y ubigeo correctos a la vez (meta de partida: 95 %%)\n\n")
+	fmt.Printf("- Datasets: `%s` (%d filas)\n- Normalizador: `%s`\n", *goldenPaths, len(rows), norm.VersionString())
+	fmt.Printf("- Métrica G1: todos los campos esperados correctos a la vez (meta de partida: 95 %%)\n\n")
 
 	fmt.Printf("## Resumen\n\n")
 	printTable("Partición", bySplit, sortedKeys(bySplit))
@@ -219,7 +220,7 @@ func main() {
 	}
 	fmt.Println()
 
-	fmt.Printf("## Exactitud G1 por transformación (pista sintética, dev y test)\n\n")
+	fmt.Printf("## Exactitud G1 por transformación (pistas sintéticas, dev y test)\n\n")
 	tags := sortedKeys(byTag)
 	sort.SliceStable(tags, func(i, j int) bool {
 		return pct(byTag[tags[i]].core, byTag[tags[i]].rows) < pct(byTag[tags[j]].core, byTag[tags[j]].rows)

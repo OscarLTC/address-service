@@ -27,7 +27,10 @@ type suffixResult struct {
 // Solo sigue consumiendo hacia la izquierda si el nombre recién consumido puede
 // ser provincia o departamento: un distrito "puro" cierra el grupo, así una
 // calle con nombre de distrito ("Jr. Santa Rosa, Rímac") no se confunde.
-func (n *Normalizer) scanSuffix(tokens []string) (names []nameMatch, rest []string) {
+//
+// Un nombre precedido por un conector sin coma ni guion en medio es el final de
+// otro nombre ("Urb. Praderas de Lurín", "Torres de los Olivos"), no la ubicación.
+func (n *Normalizer) scanSuffix(tokens []string, sepBefore []bool) (names []nameMatch, rest []string) {
 	rest = tokens
 	for iter := 0; iter < 3; iter++ {
 		found := false
@@ -39,6 +42,9 @@ func (n *Normalizer) scanSuffix(tokens []string) (names []nameMatch, rest []stri
 			key := txt.Key(strings.Join(rest[len(rest)-k:], " "))
 			lk := n.cat.Lookup(key)
 			if !lk.Known() || (len(names) > 0 && !n.nestsIn(nameMatch{key, lk}, names[0].key)) {
+				continue
+			}
+			if start := len(rest) - k; start > 0 && !sepBefore[start] && nameConnectors[rest[start-1]] {
 				continue
 			}
 			names = append([]nameMatch{{key: key, lk: lk}}, names...)
@@ -55,6 +61,9 @@ func (n *Normalizer) scanSuffix(tokens []string) (names []nameMatch, rest []stri
 	}
 	return names, rest
 }
+
+// nameConnectors son palabras que unen partes de un nombre propio.
+var nameConnectors = map[string]bool{"DE": true, "DEL": true, "LA": true, "LAS": true, "LOS": true, "EL": true, "Y": true}
 
 // nestsIn indica si el nombre puede estar dentro del área outer (provincia o
 // departamento). Evita que en "Av. Arequipa, Lima" se tome "Arequipa" como

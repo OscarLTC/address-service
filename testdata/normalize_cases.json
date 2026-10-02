@@ -656,6 +656,170 @@
     "AMBIGUOUS_DISTRICT",
     "LOCATION_SUFFIX_UNRESOLVED"
    ]
+  },
+  {
+   "name": "mza_abreviatura_de_manzana",
+   "input": {
+    "address": "Mza. J Lt. 37 Urb. Capebco - Surquillo"
+   },
+   "expect": {
+    "block": "J",
+    "lot": "37",
+    "urbanization": "URBANIZACION CAPEBCO",
+    "ubigeo": "150141"
+   }
+  },
+  {
+   "name": "mz_pegado_con_letra_sigue_funcionando",
+   "input": {
+    "address": "MzA Lt5 Urb. Los Pinos",
+    "district": "Ate"
+   },
+   "expect": {
+    "block": "A",
+    "lot": "5",
+    "urbanization": "URBANIZACION LOS PINOS"
+   }
+  },
+  {
+   "name": "mz_pegado_con_numero",
+   "input": {
+    "address": "Urb. Los Pinos Mz2 Lt. 35",
+    "district": "Ate"
+   },
+   "expect": {
+    "block": "2",
+    "lot": "35",
+    "urbanization": "URBANIZACION LOS PINOS"
+   }
+  },
+  {
+   "name": "ah_con_puntos_es_asentamiento_humano",
+   "input": {
+    "address": "Calle 5 Mz N - Lote 7 A.H. Las Flores",
+    "district": "Ventanilla"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "5",
+    "block": "N",
+    "lot": "7",
+    "urbanization": "ASENTAMIENTO HUMANO LAS FLORES"
+   }
+  },
+  {
+   "name": "ordinal_en_nombre_propio_se_conserva",
+   "input": {
+    "address": "Urb. Primero de Setiembre Mz K Lt 29",
+    "district": "Lima"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION PRIMERO DE SETIEMBRE"
+   }
+  },
+  {
+   "name": "quinta_en_nombre_propio_se_conserva",
+   "input": {
+    "address": "Mz K Lt 29 Urb. Fundo Quinta Francia",
+    "district": "El Agustino"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION FUNDO QUINTA FRANCIA"
+   }
+  },
+  {
+   "name": "ordinal_antes_de_etapa_pasa_a_digito",
+   "input": {
+    "address": "Urb. Los Pinos Primera Etapa Mz A Lt 1",
+    "district": "Ate"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION LOS PINOS 1 ETAPA",
+    "block": "A",
+    "lot": "1"
+   }
+  },
+  {
+   "name": "distrito_tras_conector_es_parte_del_nombre",
+   "input": {
+    "address": "Mz. J Lote 4 Urb. Praderas de Lurín"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION PRADERAS DE LURIN",
+    "ubigeo": ""
+   },
+   "flags_contain": [
+    "DISTRICT_NAME_IN_URBANIZATION"
+   ]
+  },
+  {
+   "name": "distrito_repetido_tras_nombre_con_conector",
+   "input": {
+    "address": "Av. Central Mz. I Lt 33 Urb Los Prados de San Miguel San Miguel"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION LOS PRADOS DE SAN MIGUEL",
+    "ubigeo": "150136"
+   }
+  },
+  {
+   "name": "campo_distrito_y_nombre_que_termina_en_distrito",
+   "input": {
+    "address": "Mz. J Lote 4 Urb. Nuevo Lurín",
+    "district": "Lurín"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION NUEVO LURIN",
+    "ubigeo": "150119"
+   },
+   "flags_contain": [
+    "DISTRICT_NAME_IN_TEXT"
+   ],
+   "flags_absent": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "campo_distrito_y_nombre_con_otro_distrito_no_es_conflicto",
+   "input": {
+    "address": "Mz 8 Lote 34 Urb. Ciudad Satélite Santa Rosa",
+    "district": "Callao"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION CIUDAD SATELITE SANTA ROSA",
+    "ubigeo": "070101"
+   },
+   "flags_contain": [
+    "DISTRICT_NAME_IN_TEXT"
+   ],
+   "flags_absent": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "sufijo_separado_por_coma_sigue_siendo_ubicacion",
+   "input": {
+    "address": "Urb. Los Pinos Mz A Lt 3, Lurín",
+    "district": "Lurín"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION LOS PINOS",
+    "ubigeo": "150119"
+   },
+   "flags_absent": [
+    "DISTRICT_NAME_IN_TEXT"
+   ]
+  },
+  {
+   "name": "sufijo_con_conector_tras_coma_sigue_siendo_ubicacion",
+   "input": {
+    "address": "Jr. Lampa 345, Cercado de Lima"
+   },
+   "expect": {
+    "street_name": "LAMPA",
+    "number": "345",
+    "ubigeo": "150101"
+   }
   }
  ]
 }

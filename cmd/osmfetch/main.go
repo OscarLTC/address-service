@@ -1,6 +1,7 @@
 // Comando osmfetch: descarga de OpenStreetMap (API Overpass) los datos crudos de
 // Lima Metropolitana y Callao: límites distritales, puntos con dirección
-// (addr:street + addr:housenumber) y calles con nombre por distrito.
+// (addr:street + addr:housenumber), áreas residenciales con nombre (urbanizaciones,
+// AA.HH., asociaciones) y calles con nombre por distrito.
 //
 //	go run ./cmd/osmfetch -out data/osm
 //
@@ -30,6 +31,8 @@ const (
 		`rel(area.a)["admin_level"="8"]["boundary"="administrative"]["pe:ubigeo"];out geom;`
 	qAddresses = `[out:json][timeout:300];` + areas +
 		`nwr(area.a)["addr:street"]["addr:housenumber"];out tags center;`
+	qAreas = `[out:json][timeout:300];` + areas +
+		`(nwr(area.a)["place"~"^(neighbourhood|suburb|quarter|hamlet)$"]["name"];nwr(area.a)["landuse"="residential"]["name"];);out tags center;`
 	// La relación de OSM r se consulta como el área 3600000000 + r.
 	qStreets = `[out:json][timeout:300];area(%d)->.d;way(area.d)["highway"]["name"];out tags geom;`
 )
@@ -47,7 +50,11 @@ func main() {
 	}
 
 	districtsPath := filepath.Join(*out, "districts.json")
-	for path, q := range map[string]string{districtsPath: qDistricts, filepath.Join(*out, "addresses.json"): qAddresses} {
+	for path, q := range map[string]string{
+		districtsPath:                         qDistricts,
+		filepath.Join(*out, "addresses.json"): qAddresses,
+		filepath.Join(*out, "areas.json"):     qAreas,
+	} {
 		if err := c.fetchTo(path, q, *force); err != nil {
 			log.Fatal(err)
 		}

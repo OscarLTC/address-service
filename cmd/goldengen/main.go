@@ -3,10 +3,12 @@
 //
 //  1. data/geo/districts.json: los límites distritales de Lima y Callao, validados
 //     contra el catálogo de ubigeos.
-//  2. El dataset de oro con dos pistas: osm_addr (puntos addr:* de OSM escritos
-//     tal como vienen) y synthetic (las mismas direcciones con el ruido que
-//     escriben las personas: abreviaturas, mayúsculas, tildes, "#", "N°", alias de
-//     distrito, ubicación concatenada, interior).
+//  2. El dataset de oro de calles (-out) con dos pistas: osm_addr (puntos addr:* de
+//     OSM escritos tal como vienen) y synthetic (las mismas direcciones con el ruido
+//     que escriben las personas: abreviaturas, mayúsculas, tildes, "#", "N°", alias
+//     de distrito, ubicación concatenada, interior).
+//  3. El dataset de oro de Mz/Lt (-mzlt-out): manzana y lote con el nombre real de
+//     una urbanización, AA.HH. o asociación de OSM, con el mismo tipo de ruido.
 //
 // El parseo esperado sale de las etiquetas de OSM y el ubigeo esperado del
 // polígono que contiene el punto, nunca del normalizador: así la evaluación no es
@@ -43,7 +45,9 @@ func main() {
 	osmDir := flag.String("osm", "data/osm", "datos crudos de cmd/osmfetch")
 	catPath := flag.String("catalog", "data/catalog/ubigeos.json", "catálogo de ubigeos")
 	distOut := flag.String("districts-out", "data/geo/districts.json", "límites distritales de salida")
-	out := flag.String("out", "goldenset/golden_v1.csv", "dataset de oro de salida")
+	out := flag.String("out", "goldenset/golden_v1.csv", "dataset de oro de calles")
+	mzltOut := flag.String("mzlt-out", "goldenset/golden_mzlt_v1.csv", "dataset de oro de Mz/Lt")
+	areasPerDistrict := flag.Int("areas-per-district", 15, "áreas (urbanizaciones, AA.HH.) por distrito en la pista Mz/Lt")
 	perDistrict := flag.Int("per-district", 20, "direcciones base por distrito")
 	perStreet := flag.Int("per-street", 2, "máximo de direcciones base por calle y distrito")
 	variants := flag.Int("variants", 2, "variantes con ruido por dirección base")
@@ -71,24 +75,51 @@ func main() {
 	}
 	log.Printf("%s: %d distritos", *distOut, index.Len())
 
-	if _, err := os.Stat(*out); err == nil && !*force {
-		log.Printf("%s ya existe: su partición test está congelada. Usa otro -out (nueva versión) o -force.", *out)
-		return
-	}
-
-	addrs, stats, err := loadAddresses(filepath.Join(*osmDir, "addresses.json"), index)
-	if err != nil {
-		log.Fatalf("direcciones: %v", err)
-	}
-	log.Printf("puntos addr:* leídos %d; descartados: %v; utilizables %d", stats.read, stats.dropped, len(addrs))
-
-	bases := sample(addrs, *perDistrict, *perStreet, *seed)
 	g := &generator{cat: cat, districts: index, seed: *seed, testPct: *testPct}
-	var rows []golden.Row
-	for _, b := range bases {
-		rows = append(rows, g.rows(b, *variants)...)
+
+	if frozen(*out, *force) {
+		log.Printf("%s ya existe: su partición test está congelada. Usa otro -out (nueva versión) o -force.", *out)
+	} else {
+		addrs, stats, err := loadAddresses(filepath.Join(*osmDir, "addresses.json"), index)
+		if err != nil {
+			log.Fatalf("direcciones: %v", err)
+		}
+		log.Printf("puntos addr:* leídos %d; descartados: %v; utilizables %d", stats.read, stats.dropped, len(addrs))
+		bases := sample(addrs, *perDistrict, *perStreet, *seed)
+		var rows []golden.Row
+		for _, b := range bases {
+			rows = append(rows, g.rows(b, *variants)...)
+		}
+		writeRows(*out, rows)
+		log.Printf("%s: %d direcciones base, %d filas (datos de OSM del %s)", *out, len(bases), len(rows), stamp)
 	}
-	f, err := os.Create(*out)
+
+	if frozen(*mzltOut, *force) {
+		log.Printf("%s ya existe: su partición test está congelada. Usa otro -mzlt-out (nueva versión) o -force.", *mzltOut)
+	} else {
+		areas, stats, err := loadAreas(filepath.Join(*osmDir, "areas.json"), cat, index)
+		if err != nil {
+			log.Fatalf("áreas: %v", err)
+		}
+		log.Printf("áreas leídas %d; descartadas: %v; utilizables %d", stats.read, stats.dropped, len(areas))
+		bases := sampleAreas(areas, *areasPerDistrict, *seed)
+		var rows []golden.Row
+		for _, a := range bases {
+			rows = append(rows, g.areaRows(a, *variants)...)
+		}
+		writeRows(*mzltOut, rows)
+		log.Printf("%s: %d áreas, %d filas", *mzltOut, len(bases), len(rows))
+	}
+}
+
+// frozen indica si un dataset ya existe y no se pidió sobrescribirlo.
+func frozen(path string, force bool) bool {
+	_, err := os.Stat(path)
+	return err == nil && !force
+}
+
+func writeRows(path string, rows []golden.Row) {
+	f, err := os.Create(path)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -98,7 +129,6 @@ func main() {
 	if err := f.Close(); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("%s: %d direcciones base, %d filas (datos de OSM del %s)", *out, len(bases), len(rows), stamp)
 }
 
 // --- límites distritales ---
@@ -507,6 +537,13 @@ func (g *generator) noisy(r *golden.Row, a address, entry *catalog.Entry, distri
 		notes = append(notes, "interior")
 	}
 
+	g.finishNoise(r, addr, entry, district, prov, dept, notes, rng)
+}
+
+// finishNoise agrega la ubicación (en campos, concatenada o mixta) y el ruido de
+// mayúsculas y tildes, y deja la dirección y las notas en la fila. Lo comparten
+// las pistas de calles y de Mz/Lt.
+func (g *generator) finishNoise(r *golden.Row, addr string, entry *catalog.Entry, district, prov, dept string, notes []string, rng *rand.Rand) {
 	// Ubicación: en campos, concatenada o mixta; con el nombre del distrito escrito
 	// de varias maneras, incluidos sus alias. Los alias débiles ("Magdalena") no se
 	// usan: son ambiguos por definición y abstenerse ante ellos es lo correcto.

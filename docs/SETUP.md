@@ -38,7 +38,7 @@ Las fuentes son sugerencias de dónde buscar; confirma la disponibilidad, la ver
 
 Tres pistas complementarias; la plantilla es `goldenset/template.csv`.
 
-- **A. Sintético (hecho en `golden_v1.csv`; faltan Mz/Lt y urbanizaciones).** A partir de calles y números de OSM se genera la dirección canónica y se le aplican transformaciones de ruido: abreviaturas (`Clle`, `Av.`), tildes, `#`/`Nº`, el distrito concatenado, errores de tipeo, Mz/Lt. Sirve como regresión del normalizador. **No mide el error real**, porque los errores inventados no son los errores humanos reales.
+- **A. Sintético (hecho: calles en `golden_v1.csv`; Mz/Lt con urbanizaciones y AA.HH. reales de OSM en `golden_mzlt_v1.csv`).** A partir de calles y números de OSM se genera la dirección canónica y se le aplican transformaciones de ruido: abreviaturas (`Clle`, `Av.`), tildes, `#`/`Nº`, el distrito concatenado, errores de tipeo, Mz/Lt. Sirve como regresión del normalizador. **No mide el error real**, porque los errores inventados no son los errores humanos reales.
 - **B. Puntos de dirección de OSM (hecho en `golden_v1.csv`).** Nodos con `addr:*` en Lima dan direcciones reales con coordenada. Sirven de puntos ancla y de verdad de referencia parcial en las zonas con cobertura.
 - **C. Direcciones reales (la que importa).** Entre 100 y 300 direcciones de la operación, anonimizadas, con parseo esperado y coordenada verificada por alguien independiente de quien la puso.
 
