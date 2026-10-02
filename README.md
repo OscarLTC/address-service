@@ -11,10 +11,13 @@ Servicio para normalizar y resolver direcciones peruanas. Este repositorio es el
 Requiere Go 1.22 o superior. No hay dependencias externas.
 
 ```bash
-make test     # 44 casos de normalización + idempotencia + catálogo
+make test     # 47 casos de normalización + idempotencia + catálogo + geometría
 make bench    # latencia del normalizador
 make run      # servidor en :8080
 make catalog  # regenera data/catalog/ubigeos.json desde el Excel del INEI
+make osm      # descarga de OpenStreetMap límites, puntos addr:* y calles de Lima y Callao (data/osm, no versionado)
+make golden   # genera data/geo/districts.json y goldenset/golden_v1.csv (no sobrescribe el test congelado)
+make eval     # evalúa el normalizador sobre el dataset de oro (falla si G1 en test < 95 %)
 ```
 
 ```bash
@@ -31,14 +34,20 @@ La ubicación (distrito, provincia, departamento) puede venir en campos separado
 ```text
 cmd/resolver/            servidor HTTP (hoy: /healthz y /v1/normalize)
 cmd/catalogbuild/        genera el catálogo desde el Excel de ubigeos del INEI
+cmd/osmfetch/            descarga datos crudos de OpenStreetMap (API Overpass)
+cmd/goldengen/           genera límites distritales y el dataset de oro desde OSM
+cmd/goldeneval/          evalúa el normalizador contra el dataset de oro
 internal/txt/            utilidades de texto (tildes, claves, fonética simple)
 internal/catalog/        catálogo de ubigeos y búsqueda por nombre
 internal/normalizer/     pipeline de normalización y detección de ubicación
+internal/geo/            polígonos, punto en polígono y límites distritales
+internal/golden/         formato CSV del dataset de oro
 data/catalog/            ubigeos.json (INEI 2022, 1891 distritos, generado) y ubigeos_seed.json (alias y zonas de Lima/Callao)
+data/geo/districts.json  límites de los 50 distritos de Lima y Callao (OSM, ODbL, generado)
 data/rules/lexicon.json  diccionarios de reglas
 data/config/zones.json   zonas de cobertura activas
 testdata/                casos de prueba del normalizador (formato independiente del lenguaje)
-goldenset/               plantilla del dataset de oro
+goldenset/               dataset de oro (ver goldenset/README.md)
 docs/                    plan, guía de arranque y ADRs
 ```
 
@@ -52,6 +61,7 @@ docs/                    plan, guía de arranque y ADRs
 ## Estado
 
 - Hecho: normalización (limpieza, tokenización, abreviaturas por posición, parseo de vía/número/Mz/Lt/interior/urbanización/referencia), detección de departamento/provincia/distrito con precedencias y ambigüedades, cobertura por zona, `/v1/normalize`.
-- Falta (siguiente): polígonos distritales, ingesta de calles desde OSM, dataset de oro, snapshot en RAM, `/v1/geocode`, admin con mapa.
+- Hecho: límites distritales de Lima y Callao desde OSM; dataset de oro v1 (pistas OSM y sintética, 2,463 filas, test congelado) y evaluador. Con `normalizer/0.4.0` la métrica G1 da 99.2 % en test, con 0 ubigeos equivocados. **No es la exactitud real**: el ruido es sintético y no hay casos con Mz/Lt ni AA.HH. (ver `goldenset/README.md`).
+- Falta (siguiente): muestra real de direcciones (pista C), casos sintéticos con Mz/Lt y urbanización, ingesta de calles al modelo de datos (Fase 2), snapshot en RAM, `/v1/geocode`, admin con mapa.
 - Catálogo: nacional (INEI 2022, 1891 distritos). Falta el distrito 1892, creado después; se agrega en `ubigeos_seed.json` y se corre `make catalog`. Solo `LIMA_METRO` está activa en `data/config/zones.json`.
 - Nombres repetidos en el país (Miraflores, San Miguel, Surco...): si exactamente uno cae en una zona activa se elige ese, con el flag `DISTRICT_BY_ACTIVE_ZONE`. Activar más zonas puede volver ambiguos nombres que hoy se resuelven.

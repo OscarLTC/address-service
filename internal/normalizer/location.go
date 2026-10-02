@@ -103,8 +103,14 @@ func flagFor(prefix, key string) string {
 	return prefix + strings.ReplaceAll(key, " ", "_")
 }
 
+// areaContext son la provincia y el departamento enviados en campos (claves txt.Key).
+// Sirven para desempatar un distrito del sufijo cuyo nombre se repite en el país.
+type areaContext struct {
+	province, department string
+}
+
 // resolveNames valida los nombres encontrados contra la jerarquía del catálogo.
-func (n *Normalizer) resolveNames(names []nameMatch) suffixResult {
+func (n *Normalizer) resolveNames(names []nameMatch, ctx areaContext) suffixResult {
 	switch len(names) {
 	case 0:
 		return suffixResult{}
@@ -127,10 +133,18 @@ func (n *Normalizer) resolveNames(names []nameMatch) suffixResult {
 		}
 	case 1:
 		nm := names[0]
+		if h, ok := districtInContext(nm, ctx); ok {
+			return suffixResult{Entry: h.Entry, Weak: h.Weak, OK: true}
+		}
 		ambiguous := len(nm.lk.Districts) > 1 || nm.lk.IsProvince || nm.lk.IsDepartment
 		if ambiguous && !n.areaActive(nm) {
 			if h, ok := n.activeDistrict(nm.lk.Districts); ok {
 				return suffixResult{Entry: h.Entry, Weak: h.Weak, OK: true, Flags: []string{"DISTRICT_BY_ACTIVE_ZONE"}}
+			}
+			// "Bellavista" es provincia en San Martín y distrito en el Callao: leerlo
+			// como provincia sería elegir en silencio.
+			if districtOutsideArea(nm) {
+				return suffixResult{Flags: []string{"AMBIGUOUS_DISTRICT"}}
 			}
 		}
 		if r, ok := n.areaLevel(nm); ok {
@@ -146,6 +160,38 @@ func (n *Normalizer) resolveNames(names []nameMatch) suffixResult {
 		}
 	}
 	return suffixResult{Flags: []string{"LOCATION_INCONSISTENT"}}
+}
+
+// districtInContext elige el único distrito del nombre que cae en la provincia o el
+// departamento enviados en campos. No aplica si el nombre es esa misma área
+// ("Lima" con province="Lima"): ahí el nombre se lee como área, no como distrito.
+func districtInContext(nm nameMatch, ctx areaContext) (catalog.DistrictHit, bool) {
+	if ctx == (areaContext{}) || nm.key == ctx.province || nm.key == ctx.department {
+		return catalog.DistrictHit{}, false
+	}
+	var found []catalog.DistrictHit
+	for _, h := range nm.lk.Districts {
+		if (ctx.province == "" || h.Entry.ProvinceKey == ctx.province) &&
+			(ctx.department == "" || h.Entry.DepartmentKey == ctx.department) {
+			found = append(found, h)
+		}
+	}
+	if len(found) != 1 {
+		return catalog.DistrictHit{}, false
+	}
+	return found[0], true
+}
+
+// districtOutsideArea indica si el nombre, que también es provincia o departamento,
+// es además un distrito fuera de esa área. "Huaral" no lo es (su distrito está en la
+// provincia Huaral); "Bellavista" sí.
+func districtOutsideArea(nm nameMatch) bool {
+	for _, h := range nm.lk.Districts {
+		if h.Entry.ProvinceKey != nm.key && h.Entry.DepartmentKey != nm.key {
+			return true
+		}
+	}
+	return false
 }
 
 // areaLevel resuelve nombres como "Lima" o "Callao", que son a la vez distrito,

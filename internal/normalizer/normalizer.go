@@ -12,7 +12,7 @@ import (
 )
 
 // Version identifica el conjunto de reglas del código. Súbela al cambiar el comportamiento.
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 // Request es la entrada. Todos los campos de ubicación son opcionales.
 type Request struct {
@@ -134,7 +134,7 @@ func (n *Normalizer) Normalize(req Request) Result {
 	refs = append(refs, tail...)
 
 	suffix, rest := n.scanSuffix(tokens)
-	sres := n.resolveNames(suffix)
+	sres := n.resolveNames(suffix, areaContext{province: txt.Key(req.Province), department: txt.Key(req.Department)})
 	switch {
 	case len(suffix) == 0:
 	case len(rest) == 0 || (len(rest) == 1 && n.isStructural(rest[0])):

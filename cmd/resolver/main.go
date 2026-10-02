@@ -20,24 +20,6 @@ type normalizeResponse struct {
 	ProcessingUS int64 `json:"processing_us"`
 }
 
-func loadZones(path string) (map[string]bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var f struct {
-		Zones map[string]string `json:"zones"`
-	}
-	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, err
-	}
-	active := map[string]bool{}
-	for zone, status := range f.Zones {
-		active[zone] = status == "active"
-	}
-	return active, nil
-}
-
 func main() {
 	addr := flag.String("addr", ":8080", "dirección de escucha")
 	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas)")
@@ -51,7 +33,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("léxico: %v", err)
 	}
-	zones, err := loadZones(filepath.Join(*dataDir, "config", "zones.json"))
+	zones, err := normalizer.LoadZones(filepath.Join(*dataDir, "config", "zones.json"))
 	if err != nil {
 		log.Fatalf("zonas: %v", err)
 	}

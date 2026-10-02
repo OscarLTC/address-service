@@ -607,6 +607,55 @@
     "WEAK_DISTRICT_ALIAS",
     "DISTRICT_BY_ACTIVE_ZONE"
    ]
+  },
+  {
+   "name": "sufijo_provincia_con_distrito_homonimo_en_otra_provincia",
+   "input": {
+    "address": "Av. Guardia Chalaca 1821, Bellavista"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "GUARDIA CHALACA",
+    "number": "1821",
+    "ubigeo": "",
+    "province": ""
+   },
+   "flags_contain": [
+    "AMBIGUOUS_DISTRICT",
+    "LOCATION_SUFFIX_UNRESOLVED"
+   ]
+  },
+  {
+   "name": "sufijo_ambiguo_desempatado_por_provincia_en_campo",
+   "input": {
+    "address": "Av. Guardia Chalaca 1821 - Bellavista",
+    "province": "Callao"
+   },
+   "expect": {
+    "street_name": "GUARDIA CHALACA",
+    "number": "1821",
+    "ubigeo": "070102",
+    "in_scope": "false"
+   },
+   "flags_absent": [
+    "AMBIGUOUS_DISTRICT",
+    "LOCATION_SUFFIX_UNRESOLVED"
+   ]
+  },
+  {
+   "name": "sufijo_provincia_con_distrito_homonimo_dentro",
+   "input": {
+    "address": "Av. Grau 123, Huaral"
+   },
+   "expect": {
+    "street_name": "GRAU",
+    "number": "123",
+    "province": "HUARAL"
+   },
+   "flags_absent": [
+    "AMBIGUOUS_DISTRICT",
+    "LOCATION_SUFFIX_UNRESOLVED"
+   ]
   }
  ]
 }

@@ -28,7 +28,7 @@ Las fuentes son sugerencias de dónde buscar; confirma la disponibilidad, la ver
 | Dato | Fuente sugerida | Para qué | Cuidado |
 |---|---|---|---|
 | Ubigeos oficiales (departamento, provincia, distrito) | INEI (clasificador de ubigeos) | Hecho: `docs/ref/UBIGEO 2022_1891 distritos.xlsx` → `make catalog` → `data/catalog/ubigeos.json` | Hay distritos creados después de 2022: agregarlos en `ubigeos_seed.json` y regenerar |
-| Límites distritales (polígonos) | INEI/IGN o la plataforma de datos abiertos del Estado; alternativa: límites administrativos en OpenStreetMap | Validar que un pin cae en el distrito correcto | Actualidad y licencia |
+| Límites distritales (polígonos) | INEI/IGN o la plataforma de datos abiertos del Estado; alternativa: límites administrativos en OpenStreetMap | Hecho con OSM: `make osm` → `make golden` → `data/geo/districts.json` (50 distritos de Lima y Callao, con `pe:ubigeo`). Validar que un pin cae en el distrito correcto | No son límites oficiales; ODbL. Reemplazar por los del INEI/IGN si se consiguen |
 | Calles de Lima | OpenStreetMap (extracto de Perú de Geofabrik, o Overpass para Lima) | Sembrar `streets` con geometría | Licencia ODbL (atribución y condiciones sobre bases derivadas); cobertura desigual en la periferia |
 | Puntos de dirección | Nodos de OpenStreetMap con `addr:street` y `addr:housenumber` | Puntos ancla iniciales con coordenada | Cobertura parcial |
 | Direcciones reales y sucias | La operación propia | Medir exactitud real; alimentar el dataset de oro | Requiere autorización y quitar datos personales (Ley 29733): solo texto de dirección y distrito, sin nombres ni teléfonos |
@@ -38,8 +38,8 @@ Las fuentes son sugerencias de dónde buscar; confirma la disponibilidad, la ver
 
 Tres pistas complementarias; la plantilla es `goldenset/template.csv`.
 
-- **A. Sintético (se puede hacer ya).** A partir de calles y números de OSM se genera la dirección canónica y se le aplican transformaciones de ruido: abreviaturas (`Clle`, `Av.`), tildes, `#`/`Nº`, el distrito concatenado, errores de tipeo, Mz/Lt. Sirve como regresión del normalizador. **No mide el error real**, porque los errores inventados no son los errores humanos reales.
-- **B. Puntos de dirección de OSM (semana 1-2).** Nodos con `addr:*` en Lima dan direcciones reales con coordenada. Sirven de puntos ancla y de verdad de referencia parcial en las zonas con cobertura.
+- **A. Sintético (hecho en `golden_v1.csv`; faltan Mz/Lt y urbanizaciones).** A partir de calles y números de OSM se genera la dirección canónica y se le aplican transformaciones de ruido: abreviaturas (`Clle`, `Av.`), tildes, `#`/`Nº`, el distrito concatenado, errores de tipeo, Mz/Lt. Sirve como regresión del normalizador. **No mide el error real**, porque los errores inventados no son los errores humanos reales.
+- **B. Puntos de dirección de OSM (hecho en `golden_v1.csv`).** Nodos con `addr:*` en Lima dan direcciones reales con coordenada. Sirven de puntos ancla y de verdad de referencia parcial en las zonas con cobertura.
 - **C. Direcciones reales (la que importa).** Entre 100 y 300 direcciones de la operación, anonimizadas, con parseo esperado y coordenada verificada por alguien independiente de quien la puso.
 
 Reglas: partición por calle (no por fila), un test congelado que no se toca para ajustar reglas, estratificar por distrito y tipo de dirección (calle con número, Mz/Lt, urbanización) e incluir casos difíciles, no solo los que salen bien.
