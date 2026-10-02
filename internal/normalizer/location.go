@@ -28,8 +28,9 @@ type suffixResult struct {
 // ser provincia o departamento: un distrito "puro" cierra el grupo, así una
 // calle con nombre de distrito ("Jr. Santa Rosa, Rímac") no se confunde.
 //
-// Un nombre precedido por un conector sin coma ni guion en medio es el final de
-// otro nombre ("Urb. Praderas de Lurín", "Torres de los Olivos"), no la ubicación.
+// Un nombre precedido por un conector o un tipo de vía, sin coma ni guion en medio,
+// es el final de otro nombre ("Urb. Praderas de Lurín", "av. San Luis"), no la
+// ubicación.
 func (n *Normalizer) scanSuffix(tokens []string, sepBefore []bool) (names []nameMatch, rest []string) {
 	rest = tokens
 	for iter := 0; iter < 3; iter++ {
@@ -44,7 +45,7 @@ func (n *Normalizer) scanSuffix(tokens []string, sepBefore []bool) (names []name
 			if !lk.Known() || (len(names) > 0 && !n.nestsIn(nameMatch{key, lk}, names[0].key)) {
 				continue
 			}
-			if start := len(rest) - k; start > 0 && !sepBefore[start] && nameConnectors[rest[start-1]] {
+			if start := len(rest) - k; start > 0 && !sepBefore[start] && n.endsName(rest[start-1]) {
 				continue
 			}
 			names = append([]nameMatch{{key: key, lk: lk}}, names...)
@@ -64,6 +65,13 @@ func (n *Normalizer) scanSuffix(tokens []string, sepBefore []bool) (names []name
 
 // nameConnectors son palabras que unen partes de un nombre propio.
 var nameConnectors = map[string]bool{"DE": true, "DEL": true, "LA": true, "LAS": true, "LOS": true, "EL": true, "Y": true}
+
+// endsName indica si prev obliga a leer lo que sigue como parte de un nombre: un
+// conector ("de", "los") o un tipo de vía ("av", "jr").
+func (n *Normalizer) endsName(prev string) bool {
+	_, isType := n.lex.streetType[txt.NoEnye(prev)]
+	return nameConnectors[prev] || isType
+}
 
 // nestsIn indica si el nombre puede estar dentro del área outer (provincia o
 // departamento). Evita que en "Av. Arequipa, Lima" se tome "Arequipa" como
@@ -360,9 +368,20 @@ func (n *Normalizer) fromFields(req Request, flags *flagSet) Location {
 		case len(hits) > 1:
 			flags.add("LOCATION_INCONSISTENT")
 			return none
-		default:
-			flags.add("UNKNOWN_DISTRICT")
 		}
+		// Campo truncado o con agregados ("SAN JUAN DE MIRAFLOR", "PUEBLO LIBRE
+		// (MAGDAL"): se acepta solo un candidato único dentro del área enviada.
+		var partial []catalog.DistrictHit
+		for _, h := range n.cat.PartialDistricts(dk) {
+			if (pk == "" || h.Entry.ProvinceKey == pk) && (ek == "" || h.Entry.DepartmentKey == ek) {
+				partial = append(partial, h)
+			}
+		}
+		if len(partial) == 1 {
+			flags.add("DISTRICT_FIELD_PARTIAL")
+			return fromEntry(partial[0].Entry, "FIELD")
+		}
+		flags.add("UNKNOWN_DISTRICT")
 	}
 	if pk != "" {
 		if e := n.cat.ProvinceEntry(pk); e != nil {

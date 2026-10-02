@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"addrsvc/internal/txt"
@@ -131,6 +132,31 @@ func (c *Catalog) observe(key string) {
 	if n := len(strings.Fields(key)); n > c.maxWords {
 		c.maxWords = n
 	}
+}
+
+// PartialDistricts busca distritos cuyo nombre (o alias fuerte) empieza con key,
+// o que aparecen completos al inicio de key seguidos de algo más. Sirve para campos
+// truncados ("SAN JUAN DE MIRAFLOR") o con agregados ("PUEBLO LIBRE MAGDAL").
+// Exige un mínimo de letras para no aceptar prefijos cortos como "SAN".
+func (c *Catalog) PartialDistricts(key string) []DistrictHit {
+	const minPrefix = 12
+	var out []DistrictHit
+	seen := map[*Entry]bool{}
+	for name, hits := range c.districts {
+		match := (len(key) >= minPrefix && strings.HasPrefix(name, key)) ||
+			(len(name) >= minPrefix && strings.HasPrefix(key, name+" "))
+		if !match {
+			continue
+		}
+		for _, h := range hits {
+			if !h.Weak && !seen[h.Entry] {
+				seen[h.Entry] = true
+				out = append(out, h)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Entry.Code < out[j].Entry.Code })
+	return out
 }
 
 // ByCode devuelve el distrito por código de ubigeo o nil.

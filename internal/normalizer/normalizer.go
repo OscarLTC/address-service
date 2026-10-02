@@ -12,7 +12,7 @@ import (
 )
 
 // Version identifica el conjunto de reglas del código. Súbela al cambiar el comportamiento.
-const Version = "0.5.0"
+const Version = "0.6.0"
 
 // Request es la entrada. Todos los campos de ubicación son opcionales.
 type Request struct {
@@ -92,6 +92,9 @@ var (
 	reAAHH     = regexp.MustCompile(`\bA\.?\s?A\.?\s?H\.?\s?H\b\.?`)
 	reAH       = regexp.MustCompile(`\bA\.\s?H\.`) // "A.H." solo con puntos: "A H" suelto es ambiguo
 	reSep      = regexp.MustCompile(`[,;]|\s-+\s?|-+\s`)
+	reNumWord  = regexp.MustCompile(`(\d)-+([A-Z]{2})`) // "302-MIRAFLORES": el guion separa
+	reUbigeo   = regexp.MustCompile(`^\d{6}$`)
+	rePostal   = regexp.MustCompile(`^(0[1-9]|1\d|2[0-5])\d{3}$`)
 	rePJ       = regexp.MustCompile(`\bP\.\s?J\b\.?`)
 	reNumLetHy = regexp.MustCompile(`(\d)-([A-Z])\b`)
 	rePunct    = regexp.MustCompile(`[^A-Z0-9Ñ\s]`)
@@ -134,6 +137,7 @@ func (n *Normalizer) Normalize(req Request) Result {
 	var tail []string
 	tokens, tail = n.cutReference(tokens)
 	refs = append(refs, tail...)
+	tokens = n.stripTail(tokens, sepBefore, flags)
 
 	suffix, rest := n.scanSuffix(tokens, sepBefore)
 	sres := n.resolveNames(suffix, areaContext{province: txt.Key(req.Province), department: txt.Key(req.Department)})
@@ -142,9 +146,10 @@ func (n *Normalizer) Normalize(req Request) Result {
 	case len(rest) == 0 || (len(rest) == 1 && n.isStructural(rest[0])):
 		flags.add("LOCATION_SUFFIX_SKIPPED")
 		suffix, sres = nil, suffixResult{}
-	case districtGiven(req) && !sepBefore[len(rest)]:
-		// El cliente ya dio el distrito y el texto no separa el sufijo con coma o
-		// guion: es más probable que sea el final de un nombre ("Urb. Nuevo Lurín").
+	case districtGiven(req) && !sepBefore[len(rest)] && n.continuesUrbanization(rest, sepBefore):
+		// El cliente ya dio el distrito y el sufijo, sin coma ni guion, continúa el
+		// nombre de una urbanización ("Urb. Los Robles Salamanca", "Urb. Nuevo Lurín"):
+		// es parte del nombre, no la ubicación.
 		flags.add("DISTRICT_NAME_IN_TEXT")
 		suffix, sres = nil, suffixResult{}
 	case !sres.OK:
@@ -163,7 +168,8 @@ func (n *Normalizer) Normalize(req Request) Result {
 		flags.add("DISTRICT_NAME_IN_URBANIZATION")
 	}
 	if len(refs) > 0 {
-		res.Components.Reference = strings.Join(refs, " ")
+		// Se suma al texto final que el parseo ya movió a la referencia.
+		res.Components.Reference = strings.TrimSpace(res.Components.Reference + " " + strings.Join(refs, " "))
 	}
 	n.finish(&res, flags)
 	res.Flags = flags.list
@@ -171,6 +177,52 @@ func (n *Normalizer) Normalize(req Request) Result {
 		res.Flags = []string{}
 	}
 	return res
+}
+
+// stripTail quita del final lo que no es dirección ni ubicación: el país, un ubigeo
+// de 6 dígitos o un código postal de 5 ("..., Lima 15801, Perú", "... 150140"). El
+// país solo se quita tras una coma o un guion, para no romper "Mi Perú".
+func (n *Normalizer) stripTail(tokens []string, sepBefore []bool, flags *flagSet) []string {
+	for len(tokens) > 1 {
+		last := tokens[len(tokens)-1]
+		switch {
+		case last == "PERU" && sepBefore[len(tokens)-1]:
+			flags.add("COUNTRY_REMOVED")
+		case reUbigeo.MatchString(last) && n.cat.ByCode(last) != nil:
+			flags.add("UBIGEO_IN_TEXT")
+		case rePostal.MatchString(last) && hasNumberBefore(tokens[:len(tokens)-1]):
+			flags.add("POSTAL_CODE_IN_TEXT")
+		default:
+			return tokens
+		}
+		tokens = tokens[:len(tokens)-1]
+	}
+	return tokens
+}
+
+func hasNumberBefore(tokens []string) bool {
+	for _, t := range tokens {
+		if reNumber.MatchString(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// continuesUrbanization indica si el final de rest es el nombre de una urbanización
+// todavía abierta: hacia atrás se llega a su marcador sin pasar por un número, una
+// unidad, un tipo de vía ni un separador.
+func (n *Normalizer) continuesUrbanization(rest []string, sepBefore []bool) bool {
+	for i := len(rest) - 1; i >= 0; i-- {
+		t := rest[i]
+		if n.isUrb(t) {
+			return true
+		}
+		if _, isType := n.lex.streetType[txt.NoEnye(t)]; isType || n.isUnit(t) || reNumber.MatchString(t) || sepBefore[i] {
+			return false
+		}
+	}
+	return false
 }
 
 // districtGiven indica si la petición trae el distrito en un campo o por ubigeo.
@@ -199,6 +251,7 @@ func (n *Normalizer) tokenize(raw string) (tokens []string, sepBefore []bool, re
 	s = reAH.ReplaceAllString(s, " AAHH ")
 	s = rePJ.ReplaceAllString(s, " PJ ")
 	s = reNumLetHy.ReplaceAllString(s, "$1$2")
+	s = reNumWord.ReplaceAllString(s, "$1 - $2")
 	s = reSep.ReplaceAllString(s, " "+sepMark+" ")
 	s = rePunct.ReplaceAllString(s, " ")
 	s = n.lex.applyPhrases(txt.Collapse(s))
@@ -352,7 +405,9 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 		flags.add("TRAILING_TEXT_MOVED_TO_REFERENCE")
 		c.Reference = strings.Join(trailing, " ")
 	}
-	c.Interior = strings.Join(interior, " ")
+	if len(interior) > 0 {
+		c.Interior = strings.TrimSpace(c.Interior + " " + strings.Join(interior, " "))
+	}
 	c.Urbanization = strings.Join(urb, " ")
 	if len(urb) == 1 { // marcador sin nombre
 		flags.add("EMPTY_URBANIZATION_NAME")
@@ -425,7 +480,15 @@ func (n *Normalizer) splitStreet(street []string, res *Result, flags *flagSet) {
 				break
 			}
 		}
-		if last > 0 {
+		if last > 1 && reNumber.MatchString(street[last-1]) && !anyDigit(street[:last-1]) {
+			// "Los Laureles 610 204": el primer número es la puerta y el
+			// segundo, el interior. Solo si el nombre no tiene dígitos, para no
+			// confundir "Bloc 5 502" o "Calle 5 245".
+			c.Number = street[last-1]
+			c.Interior = street[last]
+			flags.add("INTERIOR_FROM_BARE_NUMBER")
+			name, trailing = street[:last-1], street[last+1:]
+		} else if last > 0 {
 			c.Number = street[last]
 			name, trailing = street[:last], street[last+1:]
 			if len(trailing) == 1 && len(trailing[0]) == 1 && trailing[0][0] >= 'A' && trailing[0][0] <= 'Z' {
@@ -444,6 +507,15 @@ func (n *Normalizer) splitStreet(street []string, res *Result, flags *flagSet) {
 	if c.StreetType != "" && c.StreetName == "" {
 		flags.add("NO_STREET_NAME")
 	}
+}
+
+func anyDigit(tokens []string) bool {
+	for _, t := range tokens {
+		if strings.ContainsAny(t, "0123456789") {
+			return true
+		}
+	}
+	return false
 }
 
 func indexOf(s []string, v string) int {

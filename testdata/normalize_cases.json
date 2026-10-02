@@ -199,7 +199,6 @@
     "location_source": "NONE"
    },
    "flags_contain": [
-    "LOCATION_SUFFIX_SKIPPED",
     "LOCATION_UNKNOWN"
    ]
   },
@@ -820,6 +819,243 @@
     "number": "345",
     "ubigeo": "150101"
    }
+  },
+  {
+   "name": "distrito_repetido_al_final_sin_coma_es_ubicacion",
+   "input": {
+    "address": "Los Girasoles 118 2 piso San Martin de Porres",
+    "district": "San Martin de Porres",
+    "province": "Lima"
+   },
+   "expect": {
+    "street_name": "LOS GIRASOLES",
+    "number": "118",
+    "ubigeo": "150135"
+   },
+   "flags_absent": [
+    "DISTRICT_NAME_IN_TEXT",
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "distrito_del_texto_contradice_el_campo",
+   "input": {
+    "address": "Los Nogales 512 Piso 1 San Martin de Porres",
+    "district": "Ate",
+    "province": "Lima"
+   },
+   "expect": {
+    "street_name": "LOS NOGALES",
+    "number": "512",
+    "ubigeo": "150103"
+   },
+   "flags_contain": [
+    "DISTRICT_CONFLICT"
+   ],
+   "flags_absent": [
+    "DISTRICT_NAME_IN_TEXT"
+   ]
+  },
+  {
+   "name": "urbanizacion_con_nombre_de_distrito_lejano",
+   "input": {
+    "address": "Av. Las Palmeras 430 Urb. Los Robles Salamanca",
+    "district": "Ate",
+    "province": "Lima"
+   },
+   "expect": {
+    "street_name": "LAS PALMERAS",
+    "number": "430",
+    "urbanization": "URBANIZACION LOS ROBLES SALAMANCA",
+    "ubigeo": "150103"
+   },
+   "flags_contain": [
+    "DISTRICT_NAME_IN_TEXT"
+   ],
+   "flags_absent": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "dos_numeros_seguidos_puerta_e_interior",
+   "input": {
+    "address": "Los Laureles 610 204 San Borja",
+    "district": "San Borja"
+   },
+   "expect": {
+    "street_name": "LOS LAURELES",
+    "number": "610",
+    "interior": "204",
+    "ubigeo": "150130"
+   },
+   "flags_contain": [
+    "INTERIOR_FROM_BARE_NUMBER"
+   ]
+  },
+  {
+   "name": "calle_con_numero_en_el_nombre_no_es_interior",
+   "input": {
+    "address": "Calle 5 245",
+    "district": "Ate"
+   },
+   "expect": {
+    "street_name": "5",
+    "number": "245",
+    "interior": ""
+   },
+   "flags_absent": [
+    "INTERIOR_FROM_BARE_NUMBER"
+   ]
+  },
+  {
+   "name": "guion_pegado_entre_numero_y_distrito",
+   "input": {
+    "address": "Las Acacias 715 101-Miraflores"
+   },
+   "expect": {
+    "street_name": "LAS ACACIAS",
+    "number": "715",
+    "interior": "101",
+    "ubigeo": "150122"
+   }
+  },
+  {
+   "name": "pais_al_final",
+   "input": {
+    "address": "Pasaje Los Olmos 47, Chachapoyas, Perú"
+   },
+   "expect": {
+    "street_type": "PASAJE",
+    "street_name": "LOS OLMOS",
+    "number": "47",
+    "province": "CHACHAPOYAS",
+    "ubigeo": "",
+    "reference": ""
+   },
+   "flags_contain": [
+    "COUNTRY_REMOVED"
+   ]
+  },
+  {
+   "name": "ubigeo_pegado_al_final",
+   "input": {
+    "address": "Jr. Las Begonias 860 150140",
+    "district": "Santiago de Surco"
+   },
+   "expect": {
+    "street_name": "LAS BEGONIAS",
+    "number": "860",
+    "reference": ""
+   },
+   "flags_contain": [
+    "UBIGEO_IN_TEXT"
+   ]
+  },
+  {
+   "name": "codigo_postal_y_pais",
+   "input": {
+    "address": "Av. Los Precursores 940, San Juan de Miraflores 15801, Perú"
+   },
+   "expect": {
+    "street_name": "LOS PRECURSORES",
+    "number": "940",
+    "ubigeo": "150133"
+   },
+   "flags_contain": [
+    "POSTAL_CODE_IN_TEXT",
+    "COUNTRY_REMOVED"
+   ]
+  },
+  {
+   "name": "campo_distrito_truncado",
+   "input": {
+    "address": "Av. Los Heroes 500",
+    "district": "SAN JUAN DE MIRAFLOR",
+    "province": "LIMA",
+    "department": "LIMA"
+   },
+   "expect": {
+    "ubigeo": "150133",
+    "location_source": "FIELD"
+   },
+   "flags_contain": [
+    "DISTRICT_FIELD_PARTIAL"
+   ],
+   "flags_absent": [
+    "UNKNOWN_DISTRICT"
+   ]
+  },
+  {
+   "name": "campo_distrito_con_agregado_truncado",
+   "input": {
+    "address": "Jr. Los Tulipanes 333",
+    "district": "PUEBLO LIBRE (MAGDAL",
+    "province": "LIMA"
+   },
+   "expect": {
+    "ubigeo": "150121"
+   },
+   "flags_contain": [
+    "DISTRICT_FIELD_PARTIAL"
+   ]
+  },
+  {
+   "name": "referencia_entre_parentesis_no_borra_el_texto_final",
+   "input": {
+    "address": "Av. Arequipa 123 Edificio Sol (frente al parque)",
+    "district": "Lince"
+   },
+   "expect": {
+    "street_name": "AREQUIPA",
+    "number": "123",
+    "reference": "EDIFICIO SOL FRENTE AL PARQUE"
+   }
+  },
+  {
+   "name": "mi_peru_no_es_el_pais",
+   "input": {
+    "address": "Calle Maranatha 3 - Mi Peru"
+   },
+   "expect": {
+    "street_name": "MARANATHA",
+    "number": "3",
+    "ubigeo": "070107"
+   },
+   "flags_absent": [
+    "COUNTRY_REMOVED"
+   ]
+  },
+  {
+   "name": "calle_con_nombre_de_distrito_al_final_del_texto",
+   "input": {
+    "address": "Jr. Las Gardenias 205 Paralela Av San Luis",
+    "district": "San Borja",
+    "province": "Lima"
+   },
+   "expect": {
+    "street_name": "LAS GARDENIAS",
+    "number": "205",
+    "ubigeo": "150130"
+   },
+   "flags_absent": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "calle_con_nombre_de_distrito_sin_numero",
+   "input": {
+    "address": "Calle Lima",
+    "district": "Ate"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "LIMA",
+    "ubigeo": "150103"
+   },
+   "flags_absent": [
+    "DISTRICT_CONFLICT",
+    "AMBIGUOUS_LIMA"
+   ]
   }
  ]
 }
