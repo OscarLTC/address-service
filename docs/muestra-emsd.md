@@ -37,7 +37,7 @@ No hay histórico de coordenadas, así que se confirma la variante del plan que 
 - **"NAZCA" frente a "NASCA"**: el INEI escribe "NASCA". Falta un alias de provincia (fuera de la zona activa).
 - **En el 1.7 % de los pedidos, el distrito escrito en el texto contradice el del campo.** El normalizador lo marca con `DISTRICT_CONFLICT` y respeta el campo.
 
-## Resultado con `normalizer/0.6.0`
+## Ubicación con `normalizer/0.6.0`
 
 | Modo | Ubigeo igual al de EMS-D | Abstención | Distinto |
 |---|---:|---:|---:|
@@ -45,6 +45,22 @@ No hay histórico de coordenadas, así que se confirma la variante del plan que 
 | Solo texto | 20.2 % | 77.3 % | 2.5 % |
 
 En modo solo texto, la mayoría de las direcciones no trae el distrito escrito, por eso la abstención es alta. Ese modo no es el de EMS-D, pero muestra que un cliente que solo mande texto necesita `default_area` o revisión.
+
+## Etiquetado de 200 direcciones (2026-10-03)
+
+Se etiquetaron 200 direcciones de Lima y Callao con `scripts/emsd/planilla_etiquetado.py`. **La revisión la hizo un LLM (ChatGPT), no una persona**, así que estas etiquetas son "plata": sirven para encontrar fallos y medir el avance, no para declarar la exactitud real. Quedan 184 evaluables: 97 correctas y 87 corregidas. Otras 14 son dudosas y 2 no son direcciones. La revisión siguió la instrucción de la planilla, que tenía dos huecos: no contemplaba `S/N` (se restauró al importar) y llevó a suponer "DPTO" para interiores sin marcador.
+
+| Normalizador | G1 dev (138) | G1 test (46) | Ubigeo equivocado |
+|---|---:|---:|---:|
+| 0.6.0 | 52.9 % | 54.3 % | 2 en dev |
+| 0.7.0 | 68.1 % | 58.7 % | 0 |
+
+Los cambios de 0.7.0 salieron de los fallos de **dev**. La partición test se usa solo para medir: que suba menos que dev indica cuánto se ajustó mirando dev.
+
+Lo que más pesa en los fallos que quedan:
+- **El interior sin marcador** ("315 708"): la etiqueta dice "DPTO 708" y el normalizador "708". Es una convención que hay que decidir.
+- **El nombre de la vía que arrastra texto libre**: edificios, locales, indicaciones.
+- **Ambigüedades reales** que necesitan un criterio humano, como dos números seguidos separados por coma o guion.
 
 ## Pendiente
 

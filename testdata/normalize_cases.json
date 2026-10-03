@@ -1056,6 +1056,305 @@
     "DISTRICT_CONFLICT",
     "AMBIGUOUS_LIMA"
    ]
+  },
+  {
+   "name": "interior_dp_abreviado",
+   "input": {
+    "address": "Av. Los Fresnos 1420 dp 302",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "street_name": "LOS FRESNOS",
+    "number": "1420",
+    "interior": "DPTO 302"
+   }
+  },
+  {
+   "name": "interior_dpt_abreviado",
+   "input": {
+    "address": "Jr. Los Cipreses 870 dpt 105",
+    "district": "Lince"
+   },
+   "expect": {
+    "street_name": "LOS CIPRESES",
+    "number": "870",
+    "interior": "DPTO 105"
+   }
+  },
+  {
+   "name": "interior_apartamento",
+   "input": {
+    "address": "Calle Las Moras 233 Apartamento 4",
+    "district": "Lince"
+   },
+   "expect": {
+    "street_name": "LAS MORAS",
+    "number": "233",
+    "interior": "DPTO 4"
+   }
+  },
+  {
+   "name": "interior_torre_y_dpto",
+   "input": {
+    "address": "Av. B 315 Torre 2 Dpto 601",
+    "district": "Rimac"
+   },
+   "expect": {
+    "street_name": "B",
+    "number": "315",
+    "interior": "TORRE 2 DPTO 601"
+   }
+  },
+  {
+   "name": "piso_con_ordinal_escrito",
+   "input": {
+    "address": "Av. Los Pinos 455 primer piso",
+    "district": "Ate"
+   },
+   "expect": {
+    "street_name": "LOS PINOS",
+    "number": "455",
+    "interior": "PISO 1"
+   }
+  },
+  {
+   "name": "nivel_con_ordinal_abreviado",
+   "input": {
+    "address": "Jr. Tumbes 120 2do nivel",
+    "district": "Lima"
+   },
+   "expect": {
+    "street_name": "TUMBES",
+    "number": "120",
+    "interior": "PISO 2"
+   }
+  },
+  {
+   "name": "piso_con_numero_antes_del_marcador",
+   "input": {
+    "address": "Los Girasoles 118 2 piso",
+    "district": "Ate"
+   },
+   "expect": {
+    "street_name": "LOS GIRASOLES",
+    "number": "118",
+    "interior": "PISO 2"
+   }
+  },
+  {
+   "name": "prefijo_envio_domicilio",
+   "input": {
+    "address": "ENVIO DOMICILIO - Calle Los Robles 150 dpto 204",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "street_type": "CALLE",
+    "street_name": "LOS ROBLES",
+    "number": "150",
+    "interior": "DPTO 204"
+   },
+   "flags_contain": [
+    "NOISE_PREFIX_REMOVED"
+   ]
+  },
+  {
+   "name": "prefijo_compra_y_recoge",
+   "input": {
+    "address": "COMPRA Y RECOGE - Av. Las Torres 900",
+    "district": "Lima"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "LAS TORRES",
+    "number": "900"
+   },
+   "flags_contain": [
+    "NOISE_PREFIX_REMOVED"
+   ]
+  },
+  {
+   "name": "numero_despues_de_la_zona",
+   "input": {
+    "address": "Jr. Los Alisos zona B, 455",
+    "district": "San Juan de Miraflores"
+   },
+   "expect": {
+    "street_name": "LOS ALISOS",
+    "number": "455",
+    "urbanization": "ZONA B"
+   }
+  },
+  {
+   "name": "numero_despues_de_la_urbanizacion",
+   "input": {
+    "address": "Av. Los Castaños Urb. Las Lomas 1210 Dpto 302",
+    "district": "Pueblo Libre"
+   },
+   "expect": {
+    "street_name": "LOS CASTAÑOS",
+    "number": "1210",
+    "urbanization": "URBANIZACION LAS LOMAS",
+    "interior": "DPTO 302"
+   }
+  },
+  {
+   "name": "numero_de_etapa_en_la_urbanizacion_no_es_puerta",
+   "input": {
+    "address": "Calle 5 Mz A Lt 3 Urb Maranga 4",
+    "district": "San Miguel"
+   },
+   "expect": {
+    "street_name": "5",
+    "number": "",
+    "block": "A",
+    "lot": "3",
+    "urbanization": "URBANIZACION MARANGA 4"
+   }
+  },
+  {
+   "name": "ah_sin_punto_final",
+   "input": {
+    "address": "Jr. Los Olmos 210 A.h Villa Sol",
+    "district": "Comas"
+   },
+   "expect": {
+    "street_name": "LOS OLMOS",
+    "number": "210",
+    "urbanization": "ASENTAMIENTO HUMANO VILLA SOL"
+   }
+  },
+  {
+   "name": "asent_h_abreviado",
+   "input": {
+    "address": "Jr. Las Palmas Asent.H Nueva Vida Mz C Lt 4",
+    "district": "Comas"
+   },
+   "expect": {
+    "street_name": "LAS PALMAS",
+    "block": "C",
+    "lot": "4",
+    "urbanization": "ASENTAMIENTO HUMANO NUEVA VIDA"
+   }
+  },
+  {
+   "name": "apv_asociacion_pro_vivienda",
+   "input": {
+    "address": "Apv Los Jardines Mz B Lt 2",
+    "district": "Santa Anita"
+   },
+   "expect": {
+    "block": "B",
+    "lot": "2",
+    "urbanization": "ASOCIACION PRO VIVIENDA LOS JARDINES"
+   }
+  },
+  {
+   "name": "distrito_del_campo_repetido_tras_la_zona_es_ubicacion",
+   "input": {
+    "address": "Jr. Los Pinos 540 zona C San Juan de Miraflores",
+    "district": "San Juan de Miraflores"
+   },
+   "expect": {
+    "street_name": "LOS PINOS",
+    "number": "540",
+    "urbanization": "ZONA C",
+    "ubigeo": "150133"
+   },
+   "flags_absent": [
+    "DISTRICT_NAME_IN_TEXT"
+   ]
+  },
+  {
+   "name": "campo_lima_generico_y_distrito_en_el_texto",
+   "input": {
+    "address": "Av. Los Laureles 643 San Borja",
+    "district": "Lima",
+    "province": "Lima"
+   },
+   "expect": {
+    "street_name": "LOS LAURELES",
+    "number": "643",
+    "ubigeo": "150130"
+   },
+   "flags_contain": [
+    "GENERIC_DISTRICT_FIELD"
+   ],
+   "flags_absent": [
+    "DISTRICT_CONFLICT"
+   ]
+  },
+  {
+   "name": "mz_y_lt_pegados_en_un_token",
+   "input": {
+    "address": "Mz7lt80B Los Pinos",
+    "district": "Comas"
+   },
+   "expect": {
+    "block": "7",
+    "lot": "80B"
+   }
+  },
+  {
+   "name": "lote_pegado_al_numero",
+   "input": {
+    "address": "Calle Las Lilas MzC2 lote21",
+    "district": "Chorrillos"
+   },
+   "expect": {
+    "street_name": "LAS LILAS",
+    "block": "C2",
+    "lot": "21"
+   }
+  },
+  {
+   "name": "letra_del_lote_separada",
+   "input": {
+    "address": "Av. Los Olivos Mz F Lote 07 B",
+    "district": "Lurigancho"
+   },
+   "expect": {
+    "block": "F",
+    "lot": "07B"
+   }
+  },
+  {
+   "name": "texto_duplicado_y_truncado",
+   "input": {
+    "address": "Mz K3 Lote 9 Sector Los Andes Mz K3 Lote 9 Sector Los An",
+    "district": "Comas"
+   },
+   "expect": {
+    "block": "K3",
+    "lot": "9",
+    "urbanization": "SECTOR LOS ANDES"
+   },
+   "flags_contain": [
+    "DUPLICATED_TEXT"
+   ]
+  },
+  {
+   "name": "torre_en_nombre_propio_no_es_interior",
+   "input": {
+    "address": "Av. Haya de la Torre 458",
+    "district": "La Perla"
+   },
+   "expect": {
+    "street_name": "HAYA DE LA TORRE",
+    "number": "458",
+    "interior": ""
+   }
+  },
+  {
+   "name": "torre_en_medio_del_nombre_no_es_interior",
+   "input": {
+    "address": "Jr. José de la Torre Ugarte 475",
+    "district": "Lince"
+   },
+   "expect": {
+    "street_name": "JOSE DE LA TORRE UGARTE",
+    "number": "475",
+    "interior": ""
+   }
   }
  ]
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
 
 	"addrsvc/internal/txt"
 )
@@ -19,6 +20,7 @@ type lexiconFile struct {
 	Titles           map[string]string   `json:"titles"`
 	ReferenceMarkers []string            `json:"reference_markers"`
 	OrdinalWords     map[string]string   `json:"ordinal_words"`
+	NoisePrefixes    []string            `json:"noise_prefixes"`
 }
 
 type phrase struct {
@@ -36,6 +38,9 @@ type Lexicon struct {
 	refMarkers map[string]bool
 	ordinals   map[string]string
 	phrases    []phrase
+	// noisePrefix reconoce textos de plantilla al inicio que no son dirección
+	// ("ENVIO DOMICILIO -"); nil si el léxico no define ninguno.
+	noisePrefix *regexp.Regexp
 }
 
 // LoadLexicon lee el léxico desde un archivo JSON.
@@ -76,6 +81,13 @@ func ParseLexicon(data []byte) (*Lexicon, error) {
 			re: regexp.MustCompile(`\b` + regexp.QuoteMeta(txt.Key(from)) + `\b`),
 			to: to,
 		})
+	}
+	if len(f.NoisePrefixes) > 0 {
+		alts := make([]string, len(f.NoisePrefixes))
+		for i, p := range f.NoisePrefixes {
+			alts[i] = regexp.QuoteMeta(txt.Fold(p, true))
+		}
+		lx.noisePrefix = regexp.MustCompile(`^\s*(?:` + strings.Join(alts, "|") + `)\b[\s:-]*`)
 	}
 	// Las frases más largas primero para evitar reemplazos parciales.
 	sort.Slice(lx.phrases, func(i, j int) bool {

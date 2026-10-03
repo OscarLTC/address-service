@@ -22,6 +22,24 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRoundTripWithInterior(t *testing.T) {
+	in := []Row{{ID: "X-1", Split: "dev", ExpectedInterior: "DPTO 302", HasInterior: true}, {ID: "X-2", Split: "test", HasInterior: true}}
+	var buf bytes.Buffer
+	if err := Write(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(strings.SplitN(buf.String(), "\n", 2)[0], ","+InteriorColumn) {
+		t.Fatalf("falta la columna %s en la cabecera", InteriorColumn)
+	}
+	out, err := Read(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 || out[0] != in[0] || out[1] != in[1] {
+		t.Fatalf("ida y vuelta distinta: %+v", out)
+	}
+}
+
 func TestReadRejectsWrongHeader(t *testing.T) {
 	bad := strings.Replace(strings.Join(Header, ","), "raw_address", "address", 1) + "\n"
 	if _, err := Read(strings.NewReader(bad)); err == nil {

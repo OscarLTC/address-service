@@ -69,8 +69,9 @@ var nameConnectors = map[string]bool{"DE": true, "DEL": true, "LA": true, "LAS":
 // endsName indica si prev obliga a leer lo que sigue como parte de un nombre: un
 // conector ("de", "los") o un tipo de vía ("av", "jr").
 func (n *Normalizer) endsName(prev string) bool {
+	// La "C" suelta es ambigua ("zona C"): no cuenta como tipo de vía aquí.
 	_, isType := n.lex.streetType[txt.NoEnye(prev)]
-	return nameConnectors[prev] || isType
+	return nameConnectors[prev] || (isType && prev != "C")
 }
 
 // nestsIn indica si el nombre puede estar dentro del área outer (provincia o
@@ -284,6 +285,13 @@ func (n *Normalizer) locate(req Request, sres suffixResult, flags *flagSet) Loca
 		if sres.Weak {
 			flags.add("WEAK_DISTRICT_ALIAS")
 		}
+	case sres.Entry != nil && loc.Source == "FIELD" && loc.District != "" &&
+		txt.Key(loc.District) == txt.Key(loc.Province) && sres.Entry.ProvinceKey == txt.Key(loc.Province) &&
+		sres.Entry.Code != loc.Ubigeo:
+		// El campo dice "LIMA" (o "CALLAO"), que suele significar la provincia, y el
+		// texto nombra un distrito de esa provincia: el texto es más específico.
+		loc = fromEntry(sres.Entry, "TEXT")
+		flags.add("GENERIC_DISTRICT_FIELD")
 	case sres.Entry != nil && loc.Ubigeo != "" && sres.Entry.Code != loc.Ubigeo:
 		flags.add("DISTRICT_CONFLICT")
 	}

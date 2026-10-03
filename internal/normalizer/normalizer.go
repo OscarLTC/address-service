@@ -12,7 +12,7 @@ import (
 )
 
 // Version identifica el conjunto de reglas del código. Súbela al cambiar el comportamiento.
-const Version = "0.6.0"
+const Version = "0.7.0"
 
 // Request es la entrada. Todos los campos de ubicación son opcionales.
 type Request struct {
@@ -90,7 +90,13 @@ var (
 	reSN       = regexp.MustCompile(`\bS\s*/\s*N\b`)
 	reNroMark  = regexp.MustCompile(`#|\bN[°º]\.?|\bNRO\b\.?|\bNUM(?:ERO)?\b\.?`)
 	reAAHH     = regexp.MustCompile(`\bA\.?\s?A\.?\s?H\.?\s?H\b\.?`)
-	reAH       = regexp.MustCompile(`\bA\.\s?H\.`) // "A.H." solo con puntos: "A H" suelto es ambiguo
+	reAH       = regexp.MustCompile(`\bA\.\s?H\b\.?`) // "A.H" con punto tras la A: "A H" suelto es ambiguo
+	reAsentH   = regexp.MustCompile(`\bASENT\.?\s?H(?:UM)?\b\.?`)
+	reAPV      = regexp.MustCompile(`\bA\.\s?P\.\s?V\b\.?`)
+	reFloorNum = regexp.MustCompile(`\b(\d{1,2})\s?(?:ER|RO|DO|DA|TO|TA|VO|NO|MO|RA)?\.?\s+(?:PISO|NIVEL)\b`)
+	reFloorOrd = regexp.MustCompile(`\b(PRIMER|PRIMERO|PRIMERA|SEGUNDO|SEGUNDA|TERCER|TERCERO|TERCERA|CUARTO|CUARTA|QUINTO|QUINTA)\s+(?:PISO|NIVEL)\b`)
+	reDigitsAt = regexp.MustCompile(`^\s+\d`)
+	reGlueMzLt = regexp.MustCompile(`^MZ([A-Z]?\d{0,3}[A-Z]?)LT(\d+[A-Z]?)$`)
 	reSep      = regexp.MustCompile(`[,;]|\s-+\s?|-+\s`)
 	reNumWord  = regexp.MustCompile(`(\d)-+([A-Z]{2})`) // "302-MIRAFLORES": el guion separa
 	reUbigeo   = regexp.MustCompile(`^\d{6}$`)
@@ -99,7 +105,7 @@ var (
 	reNumLetHy = regexp.MustCompile(`(\d)-([A-Z])\b`)
 	rePunct    = regexp.MustCompile(`[^A-Z0-9Ñ\s]`)
 	reGlueMz   = regexp.MustCompile(`^MZ([A-Z]\d?|\d+)$`)
-	reGlue     = regexp.MustCompile(`^(LT|INT|DPTO|OF|PISO|CALLE|CL|CLL|AV|JR|PSJE|PJE)(\d+[A-Z]?)$`)
+	reGlue     = regexp.MustCompile(`^(LT|LOTE|INT|DPTO|DPT|DP|OF|PISO|CALLE|CL|CLL|AV|JR|PSJE|PJE)(\d+[A-Z]?)$`)
 	reNumber   = regexp.MustCompile(`^\d+[A-Z]?$`)
 	reOrdinal  = regexp.MustCompile(`^(\d+)(RA|ERA|ER|DA|DO|TA|TO|MA|VA|NA|AVO)$`)
 )
@@ -129,7 +135,8 @@ func (n *Normalizer) Normalize(req Request) Result {
 	res := Result{Raw: req.Address, Version: n.VersionString()}
 	flags := &flagSet{}
 
-	tokens, sepBefore, refs := n.tokenize(req.Address)
+	tokens, sepBefore, refs := n.tokenize(req.Address, flags)
+	tokens, sepBefore = dedupeRepeat(tokens, sepBefore, flags)
 	if len(tokens) == 0 {
 		flags.add("EMPTY_ADDRESS")
 	}
@@ -212,11 +219,16 @@ func hasNumberBefore(tokens []string) bool {
 // continuesUrbanization indica si el final de rest es el nombre de una urbanización
 // todavía abierta: hacia atrás se llega a su marcador sin pasar por un número, una
 // unidad, un tipo de vía ni un separador.
+//
+// Con un designador corto tras ZONA, SECTOR, GRUPO o ETAPA ("zona C", "sector 3") el
+// nombre ya está completo: lo que sigue no lo continúa.
 func (n *Normalizer) continuesUrbanization(rest []string, sepBefore []bool) bool {
 	for i := len(rest) - 1; i >= 0; i-- {
 		t := rest[i]
 		if n.isUrb(t) {
-			return true
+			canon := n.lex.urb[txt.NoEnye(t)]
+			short := i == len(rest)-2 && len(rest[i+1]) <= 2
+			return !(short && designators[canon])
 		}
 		if _, isType := n.lex.streetType[txt.NoEnye(t)]; isType || n.isUnit(t) || reNumber.MatchString(t) || sepBefore[i] {
 			return false
@@ -224,6 +236,9 @@ func (n *Normalizer) continuesUrbanization(rest []string, sepBefore []bool) bool
 	}
 	return false
 }
+
+// designators son marcadores que suelen llevar solo una letra o un número.
+var designators = map[string]bool{"ZONA": true, "SECTOR": true, "GRUPO": true, "ETAPA": true}
 
 // districtGiven indica si la petición trae el distrito en un campo o por ubigeo.
 func districtGiven(req Request) bool {
@@ -237,8 +252,12 @@ const sepMark = "QSEPQ"
 // tokenize aplica las capas N0-N2: limpieza, tokenización y separación de pegados.
 // sepBefore[i] indica si en el texto original había una coma o un guion separador
 // justo antes de tokens[i]; tiene un elemento más para el final del texto.
-func (n *Normalizer) tokenize(raw string) (tokens []string, sepBefore []bool, refs []string) {
+func (n *Normalizer) tokenize(raw string, flags *flagSet) (tokens []string, sepBefore []bool, refs []string) {
 	s := txt.Fold(txt.FixMojibake(raw), true)
+	if n.lex.noisePrefix != nil && n.lex.noisePrefix.MatchString(s) {
+		s = n.lex.noisePrefix.ReplaceAllString(s, " ")
+		flags.add("NOISE_PREFIX_REMOVED")
+	}
 	for _, m := range reParens.FindAllStringSubmatch(s, -1) {
 		if r := txt.Collapse(rePunct.ReplaceAllString(m[1], " ")); r != "" {
 			refs = append(refs, r)
@@ -249,7 +268,10 @@ func (n *Normalizer) tokenize(raw string) (tokens []string, sepBefore []bool, re
 	s = reNroMark.ReplaceAllString(s, " NRO ")
 	s = reAAHH.ReplaceAllString(s, " AAHH ")
 	s = reAH.ReplaceAllString(s, " AAHH ")
+	s = reAsentH.ReplaceAllString(s, " AAHH ")
+	s = reAPV.ReplaceAllString(s, " APV ")
 	s = rePJ.ReplaceAllString(s, " PJ ")
+	s = n.floorFirst(s)
 	s = reNumLetHy.ReplaceAllString(s, "$1$2")
 	s = reNumWord.ReplaceAllString(s, "$1 - $2")
 	s = reSep.ReplaceAllString(s, " "+sepMark+" ")
@@ -271,6 +293,9 @@ func (n *Normalizer) tokenize(raw string) (tokens []string, sepBefore []bool, re
 			sep = true
 		case t == "NRO":
 			continue
+		case reGlueMzLt.MatchString(t):
+			m := reGlueMzLt.FindStringSubmatch(t)
+			add("MZ", m[1], "LT", m[2])
 		case t == "MZA" && i+1 < len(fields) && n.isBlockValue(fields[i+1]):
 			// "Mza. J": abreviatura de manzana, no "Mz A" pegado.
 			add("MZ")
@@ -286,6 +311,64 @@ func (n *Normalizer) tokenize(raw string) (tokens []string, sepBefore []bool, re
 	}
 	sepBefore = append(sepBefore, sep)
 	return tokens, sepBefore, refs
+}
+
+// floorFirst reescribe el piso escrito antes de su marcador como "PISO n": "2 piso",
+// "1er piso", "2do nivel", "primer piso". No toca "Calle 5 piso 2": si al marcador le
+// sigue un número, el número de antes no es el piso.
+func (n *Normalizer) floorFirst(s string) string {
+	rewrite := func(re *regexp.Regexp, value func(string) string) {
+		var b strings.Builder
+		last := 0
+		for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
+			if reDigitsAt.MatchString(s[m[1]:]) {
+				continue
+			}
+			b.WriteString(s[last:m[0]])
+			b.WriteString(" PISO " + value(s[m[2]:m[3]]) + " ")
+			last = m[1]
+		}
+		b.WriteString(s[last:])
+		s = b.String()
+	}
+	rewrite(reFloorNum, func(d string) string { return d })
+	rewrite(reFloorOrd, func(w string) string { return n.lex.ordinals[w] })
+	return s
+}
+
+// dedupeRepeat quita una copia repetida de la dirección al final del texto, aunque
+// la copia venga truncada ("Mz K3 Lote 9 Sector X Mz K3 Lote 9 Sector").
+func dedupeRepeat(tokens []string, sepBefore []bool, flags *flagSet) ([]string, []bool) {
+	n := len(tokens)
+	for k := 3; k <= n-3; k++ {
+		m := n - k
+		if m > k {
+			continue
+		}
+		same := true
+		for j := 0; j < m && same; j++ {
+			a, b := tokens[k+j], tokens[j]
+			if j == m-1 {
+				same = strings.HasPrefix(b, a)
+			} else {
+				same = a == b
+			}
+		}
+		if same {
+			flags.add("DUPLICATED_TEXT")
+			return tokens[:k], append(sepBefore[:k:k], sepBefore[n])
+		}
+	}
+	return tokens, sepBefore
+}
+
+// unitApplies descarta marcadores que también son palabras de nombres propios:
+// "Torre" es unidad en "Torre 3" pero no en "Haya de la Torre".
+func (n *Normalizer) unitApplies(tokens []string, i int) bool {
+	if n.lex.unit[txt.NoEnye(tokens[i])] != "TORRE" {
+		return true
+	}
+	return i+1 < len(tokens) && len(tokens[i+1]) <= 2 && !n.isUnit(tokens[i+1])
 }
 
 // isBlockValue indica si el token puede ser el valor de una manzana (J, B1, 12).
@@ -359,12 +442,18 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 			c.StreetType = canon
 			flags.remove("NO_STREET_TYPE")
 			inUrb, inStreet = false, true
-		case n.isUnit(tk):
+		case n.isUnit(tk) && n.unitApplies(tokens, i):
 			canon := n.lex.unit[k]
 			val := ""
 			if i+1 < len(tokens) && !n.isUnit(tokens[i+1]) && !n.isUrb(tokens[i+1]) {
 				i++
 				val = tokens[i]
+				// "Lote 02 C": la letra suelta al final o antes de otra unidad es del lote.
+				if canon == "LT" && i+1 < len(tokens) && len(tokens[i+1]) == 1 && tokens[i+1][0] >= 'A' && tokens[i+1][0] <= 'Z' &&
+					(i+2 == len(tokens) || n.isUnit(tokens[i+2]) || n.isUrb(tokens[i+2])) {
+					i++
+					val += tokens[i]
+				}
 			} else {
 				flags.add("MISSING_UNIT_VALUE")
 			}
@@ -386,6 +475,13 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 			inUrb, inStreet = true, false
 		case inStreet:
 			street = append(street, tk)
+		case inUrb && len(urb) > 1 && !seenUnit && len(tk) >= 3 && reNumber.MatchString(tk) &&
+			(c.StreetType != "" || len(street) > 0) && !anyDigit(street):
+			// "Jr. X zona B, 455", "Av. X Urb. Las Lomas 1210": el número que sigue al
+			// nombre de la urbanización es la puerta de la vía. Se exigen 3 dígitos
+			// para no tomar la etapa ("Urb. Maranga 4").
+			street = append(street, tk)
+			flags.add("NUMBER_AFTER_URBANIZATION")
 		case inUrb:
 			next := ""
 			if i+1 < len(tokens) {

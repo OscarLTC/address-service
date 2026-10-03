@@ -1,5 +1,5 @@
 {
- "version": "0.2.0",
+ "version": "0.3.0",
  "street_types": {
   "CALLE": [
    "C",
@@ -89,7 +89,12 @@
    "DPTO",
    "DEPTO",
    "DEP",
-   "DEPARTAMENTO"
+   "DEPARTAMENTO",
+   "DP",
+   "DPT",
+   "APTO",
+   "APARTAMENTO",
+   "DEPA"
   ],
   "OF": [
    "OF",
@@ -97,7 +102,8 @@
    "OFICINA"
   ],
   "PISO": [
-   "PISO"
+   "PISO",
+   "NIVEL"
   ],
   "TDA": [
    "TDA",
@@ -106,6 +112,9 @@
   "STAND": [
    "STAND",
    "PUESTO"
+  ],
+  "TORRE": [
+   "TORRE"
   ]
  },
  "urbanization_markers": {
@@ -143,13 +152,17 @@
   ],
   "GRUPO": [
    "GRUPO"
+  ],
+  "ASOCIACION PRO VIVIENDA": [
+   "APV"
   ]
  },
  "phrases": {
   "ASENTAMIENTO HUMANO": "AAHH",
   "PUEBLO JOVEN": "PJ",
   "SIN NUMERO": "SINNUMERO",
-  "SIN NRO": "SINNUMERO"
+  "SIN NRO": "SINNUMERO",
+  "ASOCIACION PRO VIVIENDA": "APV"
  },
  "titles": {
   "STA": "SANTA",
@@ -192,5 +205,9 @@
   "CUARTO": "4",
   "QUINTA": "5",
   "QUINTO": "5"
- }
+ },
+ "noise_prefixes": [
+  "ENVIO DOMICILIO",
+  "COMPRA Y RECOGE"
+ ]
 }

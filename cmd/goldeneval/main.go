@@ -24,7 +24,7 @@ import (
 )
 
 // fields son los campos comparados, en el orden del reporte.
-var fields = []string{"street_type", "street_name", "number", "block", "lot", "urbanization", "ubigeo"}
+var fields = []string{"street_type", "street_name", "number", "interior", "block", "lot", "urbanization", "ubigeo"}
 
 func expected(r golden.Row, f string) string {
 	switch f {
@@ -34,6 +34,8 @@ func expected(r golden.Row, f string) string {
 		return r.ExpectedStreetName
 	case "number":
 		return r.ExpectedNumber
+	case "interior":
+		return r.ExpectedInterior
 	case "block":
 		return r.ExpectedBlock
 	case "lot":
@@ -55,6 +57,8 @@ func got(res normalizer.Result, f string) string {
 		return c.StreetName
 	case "number":
 		return c.Number
+	case "interior":
+		return c.Interior
 	case "block":
 		return c.Block
 	case "lot":
@@ -153,6 +157,10 @@ func main() {
 		okFields := map[string]bool{}
 		var diff []string
 		for _, f := range fields {
+			if f == "interior" && !r.HasInterior {
+				okFields[f] = true // el archivo no etiqueta el interior
+				continue
+			}
 			e, g := expected(r, f), got(res, f)
 			okFields[f] = e == g
 			if e != g {
