@@ -87,3 +87,14 @@ func TestDistrictsFile(t *testing.T) {
 		}
 	}
 }
+
+func TestDistances(t *testing.T) {
+	a, b := Point{-77.03, -12.12}, Point{-77.03, -12.121}
+	if d := DistanceM(a, b); d < 110 || d > 112 {
+		t.Errorf("DistanceM = %.1f, se esperaba ~111 m", d)
+	}
+	line := []Point{{-77.031, -12.12}, {-77.029, -12.12}}
+	if d := LineDistanceM(b, line); d < 110 || d > 112 {
+		t.Errorf("LineDistanceM = %.1f, se esperaba ~111 m", d)
+	}
+}

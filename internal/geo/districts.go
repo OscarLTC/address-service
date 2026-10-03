@@ -3,6 +3,7 @@ package geo
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 )
 
@@ -79,3 +80,42 @@ func (d *Districts) ByCode(code string) *District { return d.byCode[code] }
 
 // Len es la cantidad de distritos.
 func (d *Districts) Len() int { return len(d.list) }
+
+// Centroids devuelve un punto representativo por distrito: el centroide del anillo
+// de mayor área. Sirve como ubicación de último recurso (precisión DISTRICT).
+func (d *Districts) Centroids() map[string]Point {
+	out := map[string]Point{}
+	for _, x := range d.list {
+		var best Ring
+		bestArea := -1.0
+		for _, r := range x.area.Rings {
+			if a := math.Abs(signedArea(r)); a > bestArea {
+				best, bestArea = r, a
+			}
+		}
+		out[x.Ubigeo] = ringCentroid(best)
+	}
+	return out
+}
+
+func signedArea(r Ring) float64 {
+	s := 0.0
+	for i := 0; i+1 < len(r); i++ {
+		s += r[i][0]*r[i+1][1] - r[i+1][0]*r[i][1]
+	}
+	return s / 2
+}
+
+func ringCentroid(r Ring) Point {
+	a := signedArea(r)
+	if a == 0 {
+		return r[0]
+	}
+	var cx, cy float64
+	for i := 0; i+1 < len(r); i++ {
+		f := r[i][0]*r[i+1][1] - r[i+1][0]*r[i][1]
+		cx += (r[i][0] + r[i+1][0]) * f
+		cy += (r[i][1] + r[i+1][1]) * f
+	}
+	return Point{cx / (6 * a), cy / (6 * a)}
+}

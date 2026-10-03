@@ -4,3 +4,4 @@ bin/
 .env
 data/private/
 data/osm/
+data/snapshot/

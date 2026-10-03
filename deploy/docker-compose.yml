@@ -1,0 +1,26 @@
+# Base de datos local del plano de control (PostgreSQL + PostGIS).
+#
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# Las migraciones de migrations/ se aplican solas la primera vez que se crea el
+# volumen. Credenciales solo para desarrollo local.
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: addrsvc-db
+    environment:
+      POSTGRES_DB: addrsvc
+      POSTGRES_USER: addrsvc
+      POSTGRES_PASSWORD: addrsvc
+    ports:
+      - "55432:5432"
+    volumes:
+      - addrsvc-db:/var/lib/postgresql/data
+      - ../migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U addrsvc -d addrsvc"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  addrsvc-db:

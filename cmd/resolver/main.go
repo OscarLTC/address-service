@@ -1,5 +1,5 @@
-// Comando resolver: por ahora expone /v1/normalize (Fase 1 del plan).
-// Más adelante aquí vivirá el snapshot en RAM y /v1/geocode.
+// Comando resolver: plano de datos. Expone /v1/normalize y, si hay un snapshot,
+// /v1/geocode. Responde solo desde memoria: no consulta la base de datos por request.
 package main
 
 import (
@@ -12,8 +12,23 @@ import (
 	"time"
 
 	"addrsvc/internal/catalog"
+	"addrsvc/internal/geo"
 	"addrsvc/internal/normalizer"
+	"addrsvc/internal/resolver"
+	"addrsvc/internal/snapshot"
 )
+
+type geocodeRequest struct {
+	ExternalID string `json:"external_id,omitempty"`
+	normalizer.Request
+}
+
+type geocodeResponse struct {
+	ExternalID string `json:"external_id,omitempty"`
+	resolver.Result
+	DatasetVersion string `json:"dataset_version"`
+	ProcessingUS   int64  `json:"processing_us"`
+}
 
 type normalizeResponse struct {
 	normalizer.Result
@@ -23,6 +38,7 @@ type normalizeResponse struct {
 func main() {
 	addr := flag.String("addr", ":8080", "dirección de escucha")
 	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas)")
+	snapPath := flag.String("snapshot", "data/snapshot/lima.snap", "snapshot del resolver (sin él, /v1/geocode no se expone)")
 	flag.Parse()
 
 	cat, err := catalog.Load(filepath.Join(*dataDir, "catalog", "ubigeos.json"))
@@ -60,6 +76,29 @@ func main() {
 		res := norm.Normalize(req)
 		writeJSON(w, http.StatusOK, normalizeResponse{Result: res, ProcessingUS: time.Since(start).Microseconds()})
 	})
+
+	if snap, err := snapshot.Load(*snapPath); err != nil {
+		log.Printf("sin snapshot (%v): /v1/geocode no disponible", err)
+	} else {
+		districts, err := geo.LoadDistricts(filepath.Join(*dataDir, "geo", "districts.json"))
+		if err != nil {
+			log.Fatalf("límites: %v", err)
+		}
+		res := resolver.New(norm, snap, districts.Centroids())
+		log.Printf("snapshot %s: %d calles", snap.Version, len(snap.Streets))
+		mux.HandleFunc("POST /v1/geocode", func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			var req geocodeRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "JSON inválido"})
+				return
+			}
+			start := time.Now()
+			out := res.Geocode(req.Request)
+			writeJSON(w, http.StatusOK, geocodeResponse{ExternalID: req.ExternalID, Result: out,
+				DatasetVersion: res.Version(), ProcessingUS: time.Since(start).Microseconds()})
+		})
+	}
 
 	srv := &http.Server{
 		Addr:              *addr,
