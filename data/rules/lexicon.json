@@ -1,5 +1,5 @@
 {
- "version": "0.3.0",
+ "version": "0.4.0",
  "street_types": {
   "CALLE": [
    "C",
@@ -115,6 +115,15 @@
   ],
   "TORRE": [
    "TORRE"
+  ],
+  "CASA": [
+   "CASA"
+  ],
+  "SOTANO": [
+   "SOTANO"
+  ],
+  "LOCAL": [
+   "LOCAL"
   ]
  },
  "urbanization_markers": {

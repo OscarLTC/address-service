@@ -22,7 +22,7 @@ osm:
 	go run ./cmd/osmfetch -out data/osm
 
 golden:
-	go run ./cmd/goldengen -osm data/osm -out goldenset/golden_v1.csv -mzlt-out goldenset/golden_mzlt_v1.csv
+	go run ./cmd/goldengen -osm data/osm -out goldenset/golden_v1.csv -mzlt-out goldenset/golden_mzlt_v2.csv
 
 eval:
-	go run ./cmd/goldeneval -golden goldenset/golden_v1.csv,goldenset/golden_mzlt_v1.csv -min-core 95
+	go run ./cmd/goldeneval -golden goldenset/golden_v1.csv,goldenset/golden_mzlt_v2.csv -min-core 95

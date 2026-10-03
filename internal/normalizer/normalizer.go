@@ -12,7 +12,7 @@ import (
 )
 
 // Version identifica el conjunto de reglas del código. Súbela al cambiar el comportamiento.
-const Version = "0.7.0"
+const Version = "0.8.0"
 
 // Request es la entrada. Todos los campos de ubicación son opcionales.
 type Request struct {
@@ -97,6 +97,11 @@ var (
 	reFloorOrd = regexp.MustCompile(`\b(PRIMER|PRIMERO|PRIMERA|SEGUNDO|SEGUNDA|TERCER|TERCERO|TERCERA|CUARTO|CUARTA|QUINTO|QUINTA)\s+(?:PISO|NIVEL)\b`)
 	reDigitsAt = regexp.MustCompile(`^\s+\d`)
 	reGlueMzLt = regexp.MustCompile(`^MZ([A-Z]?\d{0,3}[A-Z]?)LT(\d+[A-Z]?)$`)
+	reLetDig   = regexp.MustCompile(`\b([A-Z]{1,2})-(\d+)\b`) // "B-204" -> "B204"
+	reLetLet   = regexp.MustCompile(`([A-Z])-([A-Z])`)        // "ROSALES-COMAS": el guion separa
+	reValue    = regexp.MustCompile(`^([A-Z]{1,2}\d+[A-Z]?|\d+[A-Z]{0,2}|[A-Z])$`)
+	reCode     = regexp.MustCompile(`^[A-Z]{1,2}\d+[A-Z]?$`)
+	reShortNum = regexp.MustCompile(`^\d{1,2}$`)
 	reSep      = regexp.MustCompile(`[,;]|\s-+\s?|-+\s`)
 	reNumWord  = regexp.MustCompile(`(\d)-+([A-Z]{2})`) // "302-MIRAFLORES": el guion separa
 	reUbigeo   = regexp.MustCompile(`^\d{6}$`)
@@ -142,9 +147,18 @@ func (n *Normalizer) Normalize(req Request) Result {
 	}
 
 	var tail []string
-	tokens, tail = n.cutReference(tokens)
+	tokens, tail = n.cutReference(tokens, sepBefore)
 	refs = append(refs, tail...)
 	tokens = n.stripTail(tokens, sepBefore, flags)
+	tokens, sepBefore = n.stripPrefix(tokens, sepBefore, req, &refs, flags)
+	// Un tipo de vía suelto al final ("... urb Pro Lima calle") no tiene nombre.
+	// Solo los tipos que casi nunca terminan un nombre ("Urb. Villa Parque" sí).
+	if l := len(tokens); l > 1 && tokens[l-1] != "C" {
+		if t := n.lex.streetType[txt.NoEnye(tokens[l-1])]; t == "CALLE" || t == "AVENIDA" || t == "JIRON" || t == "PASAJE" {
+			refs = append([]string{tokens[l-1]}, refs...)
+			tokens = tokens[:l-1]
+		}
+	}
 
 	suffix, rest := n.scanSuffix(tokens, sepBefore)
 	sres := n.resolveNames(suffix, areaContext{province: txt.Key(req.Province), department: txt.Key(req.Department)})
@@ -193,8 +207,14 @@ func (n *Normalizer) stripTail(tokens []string, sepBefore []bool, flags *flagSet
 	for len(tokens) > 1 {
 		last := tokens[len(tokens)-1]
 		switch {
-		case last == "PERU" && sepBefore[len(tokens)-1]:
+		case last == "PERU" && (sepBefore[len(tokens)-1] || reNumber.MatchString(tokens[len(tokens)-2]) ||
+			n.cat.Lookup(txt.Key(tokens[len(tokens)-2])).Known()):
 			flags.add("COUNTRY_REMOVED")
+		case reShortNum.MatchString(last) && len(tokens) > 2 && sepBefore[len(tokens)-2] &&
+			(tokens[len(tokens)-2] == "LIMA" || tokens[len(tokens)-2] == "CALLAO"):
+			// "..., Lima 20": distrito postal antiguo.
+			flags.add("POSTAL_CODE_IN_TEXT")
+			tokens = tokens[:len(tokens)-1]
 		case reUbigeo.MatchString(last) && n.cat.ByCode(last) != nil:
 			flags.add("UBIGEO_IN_TEXT")
 		case rePostal.MatchString(last) && hasNumberBefore(tokens[:len(tokens)-1]):
@@ -240,6 +260,34 @@ func (n *Normalizer) continuesUrbanization(rest []string, sepBefore []bool) bool
 // designators son marcadores que suelen llevar solo una letra o un número.
 var designators = map[string]bool{"ZONA": true, "SECTOR": true, "GRUPO": true, "ETAPA": true}
 
+// stripPrefix quita del inicio lo que no es la dirección: el distrito del pedido
+// antes de la urbanización o la Mz ("Villa El Salvador Sector 3 ..."), o un
+// establecimiento separado de la vía ("Plaza Norte - Av. ..."), que va a referencia.
+func (n *Normalizer) stripPrefix(tokens []string, sepBefore []bool, req Request, refs *[]string, flags *flagSet) ([]string, []bool) {
+	if dk := txt.Key(req.District); dk != "" {
+		for k := 1; k < len(tokens) && k <= n.cat.MaxWords(); k++ {
+			if txt.Key(strings.Join(tokens[:k], " ")) == dk && (n.isUrb(tokens[k]) || n.isUnit(tokens[k])) {
+				flags.add("DISTRICT_PREFIX_REMOVED")
+				return tokens[k:], sepBefore[k:]
+			}
+		}
+	}
+	for s := 1; s < len(tokens)-1 && s <= 4; s++ {
+		if !sepBefore[s] {
+			continue
+		}
+		seg := tokens[:s]
+		_, isType := n.lex.streetType[txt.NoEnye(tokens[s])]
+		if isType && tokens[s] != "C" && !anyDigit(seg) && !n.isUrb(seg[0]) && !n.isUnit(seg[0]) {
+			*refs = append(append([]string{}, seg...), *refs...)
+			flags.add("ESTABLISHMENT_PREFIX")
+			return tokens[s:], sepBefore[s:]
+		}
+		break
+	}
+	return tokens, sepBefore
+}
+
 // districtGiven indica si la petición trae el distrito en un campo o por ubigeo.
 func districtGiven(req Request) bool {
 	return strings.TrimSpace(req.District) != "" || strings.TrimSpace(req.Ubigeo) != ""
@@ -273,7 +321,9 @@ func (n *Normalizer) tokenize(raw string, flags *flagSet) (tokens []string, sepB
 	s = rePJ.ReplaceAllString(s, " PJ ")
 	s = n.floorFirst(s)
 	s = reNumLetHy.ReplaceAllString(s, "$1$2")
+	s = reLetDig.ReplaceAllString(s, "$1$2")
 	s = reNumWord.ReplaceAllString(s, "$1 - $2")
+	s = reLetLet.ReplaceAllString(s, "$1 - $2")
 	s = reSep.ReplaceAllString(s, " "+sepMark+" ")
 	s = rePunct.ReplaceAllString(s, " ")
 	s = n.lex.applyPhrases(txt.Collapse(s))
@@ -293,6 +343,9 @@ func (n *Normalizer) tokenize(raw string, flags *flagSet) (tokens []string, sepB
 			sep = true
 		case t == "NRO":
 			continue
+		case t == "SN" && len(tokens) > 0 && (i+1 == len(fields) || fields[i+1] == sepMark || n.isUnit(fields[i+1]) || n.isUrb(fields[i+1])):
+			// "Jr. X sn - Torre 2": SN tras el nombre es "sin número", no "San".
+			add("SINNUMERO")
 		case reGlueMzLt.MatchString(t):
 			m := reGlueMzLt.FindStringSubmatch(t)
 			add("MZ", m[1], "LT", m[2])
@@ -365,11 +418,18 @@ func dedupeRepeat(tokens []string, sepBefore []bool, flags *flagSet) ([]string, 
 // unitApplies descarta marcadores que también son palabras de nombres propios:
 // "Torre" es unidad en "Torre 3" pero no en "Haya de la Torre".
 func (n *Normalizer) unitApplies(tokens []string, i int) bool {
-	if n.lex.unit[txt.NoEnye(tokens[i])] != "TORRE" {
+	if !ambiguousUnits[n.lex.unit[txt.NoEnye(tokens[i])]] {
 		return true
 	}
-	return i+1 < len(tokens) && len(tokens[i+1]) <= 2 && !n.isUnit(tokens[i+1])
+	if i > 0 && nameConnectors[tokens[i-1]] {
+		return false
+	}
+	return i+1 < len(tokens) && len(tokens[i+1]) <= 4 && reValue.MatchString(tokens[i+1])
 }
+
+// ambiguousUnits son marcadores que también son palabras comunes: solo cuentan como
+// unidad si les sigue un valor ("Casa 7", "Torre B", "Tda 146A").
+var ambiguousUnits = map[string]bool{"TORRE": true, "CASA": true, "TDA": true, "LOCAL": true, "SOTANO": true, "STAND": true}
 
 // isBlockValue indica si el token puede ser el valor de una manzana (J, B1, 12).
 func (n *Normalizer) isBlockValue(t string) bool {
@@ -377,9 +437,13 @@ func (n *Normalizer) isBlockValue(t string) bool {
 }
 
 // cutReference separa lo que viene después de "frente a", "cerca de", etc.
-func (n *Normalizer) cutReference(tokens []string) (addr, ref []string) {
+// "Casa" sin valor es descripción ("casa de 2 pisos") salvo dentro del nombre de una
+// urbanización ("Urb. Casa del Adulto Mayor"); al final o tras un separador, siempre lo es.
+func (n *Normalizer) cutReference(tokens []string, sepBefore []bool) (addr, ref []string) {
 	for i := 2; i < len(tokens); i++ {
-		if n.lex.refMarkers[txt.NoEnye(tokens[i])] {
+		casaDesc := n.lex.unit[txt.NoEnye(tokens[i])] == "CASA" && !n.unitApplies(tokens, i) &&
+			(i == len(tokens)-1 || sepBefore[i] || !n.continuesUrbanization(tokens[:i], sepBefore))
+		if n.lex.refMarkers[txt.NoEnye(tokens[i])] || casaDesc {
 			cut := i
 			if p := tokens[i-1]; p == "AL" || p == "A" || p == "POR" {
 				cut = i - 1
@@ -427,14 +491,36 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 		}
 	}
 
-	var street, urb, trailing []string
-	var interior []string
-	inUrb, seenUnit, inStreet := false, false, false
+	var street, urb, trailing, interior, loose, pendingEtapa []string
+	inUrb, seenUnit, seenBlockLot, inStreet := false, false, false, false
+	// closeLoose decide qué era el texto sin marcador que siguió a Mz/Lt: una vía
+	// con número ("Los Jazmines 240"), una etapa que precede al marcador, texto
+	// suelto antes de otra urbanización, o el nombre de un lugar sin marcador.
+	closeLoose := func(beforeMarker bool) {
+		if len(loose) == 0 {
+			return
+		}
+		last := loose[len(loose)-1]
+		switch {
+		case beforeMarker && indexOf(loose, "ETAPA") >= 0:
+			pendingEtapa = append(pendingEtapa, loose...)
+		case len(street) == 0 && c.StreetType == "" && len(loose) > 1 && reNumber.MatchString(last) && len(last) >= 2:
+			street = append(street, loose...)
+			flags.add("STREET_AFTER_BLOCK")
+		case beforeMarker || len(urb) > 0:
+			trailing = append(trailing, loose...)
+		default:
+			urb = append(urb, loose...)
+			flags.add("URBANIZATION_WITHOUT_MARKER")
+		}
+		loose = nil
+	}
 	for i < len(tokens) {
 		tk := tokens[i]
 		k := txt.NoEnye(tk)
 		switch {
 		case n.startsLateStreet(tokens, i, c.StreetType, len(street), (inUrb && len(urb) > 1) || seenUnit):
+			closeLoose(false)
 			canon := n.lex.streetType[k]
 			if tk != canon {
 				flags.add("ABBREVIATION_EXPANDED")
@@ -443,8 +529,13 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 			flags.remove("NO_STREET_TYPE")
 			inUrb, inStreet = false, true
 		case n.isUnit(tk) && n.unitApplies(tokens, i):
+			closeLoose(false)
 			canon := n.lex.unit[k]
 			val := ""
+			// "Departamento de C": el conector no es el valor.
+			if i+2 < len(tokens) && (tokens[i+1] == "DE" || tokens[i+1] == "DEL") && reValue.MatchString(tokens[i+2]) {
+				i++
+			}
 			if i+1 < len(tokens) && !n.isUnit(tokens[i+1]) && !n.isUrb(tokens[i+1]) {
 				i++
 				val = tokens[i]
@@ -454,19 +545,27 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 					i++
 					val += tokens[i]
 				}
+				// "Lote 12, 12": el valor repetido se descarta.
+				if i+1 < len(tokens) && tokens[i+1] == val {
+					i++
+					flags.add("REPEATED_VALUE")
+				}
 			} else {
 				flags.add("MISSING_UNIT_VALUE")
 			}
 			switch canon {
 			case "MZ":
 				c.Block = val
+				seenBlockLot = true
 			case "LT":
 				c.Lot = val
+				seenBlockLot = true
 			default:
 				interior = append(interior, strings.TrimSpace(canon+" "+val))
 			}
 			seenUnit = true
 		case n.isUrb(tk):
+			closeLoose(true)
 			canon := n.lex.urb[k]
 			if tk != canon {
 				flags.add("ABBREVIATION_EXPANDED")
@@ -482,12 +581,22 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 			// para no tomar la etapa ("Urb. Maranga 4").
 			street = append(street, tk)
 			flags.add("NUMBER_AFTER_URBANIZATION")
+		case inUrb && len(urb) > 1 && i == len(tokens)-1 && reCode.MatchString(tk) && anyDigit(street):
+			// "Jr. X 120 Condominio Las Palmas B-204": código de unidad al final.
+			interior = append(interior, tk)
+			flags.add("INTERIOR_CODE_AFTER_URBANIZATION")
 		case inUrb:
 			next := ""
 			if i+1 < len(tokens) {
 				next = tokens[i+1]
 			}
 			urb = append(urb, n.urbToken(tk, next))
+		case len(loose) > 0 || (seenBlockLot && len(urb) == 0 && !reNumber.MatchString(tk)):
+			next := ""
+			if i+1 < len(tokens) {
+				next = tokens[i+1]
+			}
+			loose = append(loose, n.urbToken(tk, next))
 		case seenUnit:
 			trailing = append(trailing, tk)
 		default:
@@ -495,19 +604,75 @@ func (n *Normalizer) parse(tokens []string, res *Result, flags *flagSet) {
 		}
 		i++
 	}
+	closeLoose(false)
 
 	n.splitStreet(street, res, flags)
 	if len(trailing) > 0 {
 		flags.add("TRAILING_TEXT_MOVED_TO_REFERENCE")
-		c.Reference = strings.Join(trailing, " ")
+		c.Reference = strings.TrimSpace(c.Reference + " " + strings.Join(trailing, " "))
 	}
-	if len(interior) > 0 {
+	if interior = dedupeUnits(interior); len(interior) > 0 {
 		c.Interior = strings.TrimSpace(c.Interior + " " + strings.Join(interior, " "))
 	}
+	if cut, ok := n.cutDistrictFromUrb(urb, res.Location.Ubigeo); ok {
+		urb = cut
+		flags.add("DISTRICT_REMOVED_FROM_URBANIZATION")
+	}
+	urb = append(urb, pendingEtapa...)
 	c.Urbanization = strings.Join(urb, " ")
-	if len(urb) == 1 { // marcador sin nombre
+	if len(urb) == 1 && n.isUrb(urb[0]) { // marcador sin nombre
 		flags.add("EMPTY_URBANIZATION_NAME")
 	}
+}
+
+// dedupeUnits quita unidades repetidas ("DPTO 603 DPTO 603") y las que quedaron
+// sin valor cuando la misma unidad aparece con valor ("DPTO 603 APT").
+func dedupeUnits(units []string) []string {
+	withValue := map[string]bool{}
+	for _, u := range units {
+		if f := strings.Fields(u); len(f) > 1 {
+			withValue[f[0]] = true
+		}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, u := range units {
+		if seen[u] || (len(strings.Fields(u)) == 1 && withValue[u]) {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
+}
+
+// cutDistrictFromUrb corta el nombre de la urbanización donde aparece el distrito de
+// la ubicación ("URBANIZACION LOS ROSALES COMAS" en Comas). No corta si el distrito
+// sigue a un conector ("Los Prados de San Miguel") ni deja la urbanización sin nombre.
+func (n *Normalizer) cutDistrictFromUrb(urb []string, ubigeo string) ([]string, bool) {
+	e := n.cat.ByCode(ubigeo)
+	if e == nil || len(urb) < 3 {
+		return urb, false
+	}
+	names := [][]string{strings.Fields(e.DistrictKey)}
+	for _, a := range e.Aliases {
+		names = append(names, strings.Fields(txt.Key(a)))
+	}
+	keys := make([]string, len(urb))
+	for i, w := range urb {
+		keys[i] = txt.Key(w)
+	}
+	for j := 2; j < len(keys); j++ {
+		if nameConnectors[keys[j-1]] {
+			continue
+		}
+		for _, nm := range names {
+			if j+len(nm) <= len(keys) && strings.Join(keys[j:j+len(nm)], " ") == strings.Join(nm, " ") {
+				return urb[:j], true
+			}
+		}
+	}
+	return urb, false
 }
 
 // startsLateStreet indica si tokens[i] abre una vía que aparece después de la
@@ -576,7 +741,11 @@ func (n *Normalizer) splitStreet(street []string, res *Result, flags *flagSet) {
 				break
 			}
 		}
-		if last > 1 && reNumber.MatchString(street[last-1]) && !anyDigit(street[:last-1]) {
+		if last > 1 && street[last-1] == street[last] && !anyDigit(street[:last-1]) {
+			c.Number = street[last]
+			flags.add("REPEATED_NUMBER")
+			name, trailing = street[:last-1], street[last+1:]
+		} else if last > 1 && reNumber.MatchString(street[last-1]) && !anyDigit(street[:last-1]) {
 			// "Los Laureles 610 204": el primer número es la puerta y el
 			// segundo, el interior. Solo si el nombre no tiene dígitos, para no
 			// confundir "Bloc 5 502" o "Calle 5 245".
@@ -589,6 +758,11 @@ func (n *Normalizer) splitStreet(street []string, res *Result, flags *flagSet) {
 			name, trailing = street[:last], street[last+1:]
 			if len(trailing) == 1 && len(trailing[0]) == 1 && trailing[0][0] >= 'A' && trailing[0][0] <= 'Z' {
 				c.Number += trailing[0]
+				trailing = nil
+			} else if len(trailing) == 1 && reCode.MatchString(trailing[0]) {
+				// "120 B204": código de unidad sin marcador justo después de la puerta.
+				c.Interior = trailing[0]
+				flags.add("INTERIOR_FROM_BARE_NUMBER")
 				trailing = nil
 			}
 		} else {

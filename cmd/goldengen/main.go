@@ -46,7 +46,7 @@ func main() {
 	catPath := flag.String("catalog", "data/catalog/ubigeos.json", "catálogo de ubigeos")
 	distOut := flag.String("districts-out", "data/geo/districts.json", "límites distritales de salida")
 	out := flag.String("out", "goldenset/golden_v1.csv", "dataset de oro de calles")
-	mzltOut := flag.String("mzlt-out", "goldenset/golden_mzlt_v1.csv", "dataset de oro de Mz/Lt")
+	mzltOut := flag.String("mzlt-out", "goldenset/golden_mzlt_v2.csv", "dataset de oro de Mz/Lt")
 	areasPerDistrict := flag.Int("areas-per-district", 15, "áreas (urbanizaciones, AA.HH.) por distrito en la pista Mz/Lt")
 	perDistrict := flag.Int("per-district", 20, "direcciones base por distrito")
 	perStreet := flag.Int("per-street", 2, "máximo de direcciones base por calle y distrito")

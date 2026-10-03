@@ -768,11 +768,11 @@
     "district": "Lurín"
    },
    "expect": {
-    "urbanization": "URBANIZACION NUEVO LURIN",
+    "urbanization": "URBANIZACION NUEVO",
     "ubigeo": "150119"
    },
    "flags_contain": [
-    "DISTRICT_NAME_IN_TEXT"
+    "DISTRICT_REMOVED_FROM_URBANIZATION"
    ],
    "flags_absent": [
     "DISTRICT_CONFLICT"
@@ -1354,6 +1354,325 @@
     "street_name": "JOSE DE LA TORRE UGARTE",
     "number": "475",
     "interior": ""
+   }
+  },
+  {
+   "name": "urbanizacion_con_distrito_del_pedido_pegado",
+   "input": {
+    "address": "Av. Los Cedros Mz K Lote 8 Urb Los Rosales-Comas",
+    "district": "Comas"
+   },
+   "expect": {
+    "block": "K",
+    "lot": "8",
+    "urbanization": "URBANIZACION LOS ROSALES",
+    "ubigeo": "150110"
+   }
+  },
+  {
+   "name": "cooperativa_con_distrito_repetido",
+   "input": {
+    "address": "Pasaje 4 Mz B2 lote 6 coop las flores comas, dpto 205 COMAS",
+    "district": "Comas"
+   },
+   "expect": {
+    "street_name": "4",
+    "urbanization": "COOPERATIVA LAS FLORES",
+    "interior": "DPTO 205"
+   },
+   "flags_contain": [
+    "DISTRICT_REMOVED_FROM_URBANIZATION"
+   ]
+  },
+  {
+   "name": "urbanizacion_con_distrito_y_casa_al_final",
+   "input": {
+    "address": "Calle Los Pinos Mz C1 Lt 12 Etapa 2 Urb Las Lomas Ate Casa",
+    "district": "Ate"
+   },
+   "expect": {
+    "block": "C1",
+    "lot": "12",
+    "urbanization": "URBANIZACION LAS LOMAS ETAPA 2"
+   }
+  },
+  {
+   "name": "distrito_tras_conector_dentro_del_nombre_se_conserva",
+   "input": {
+    "address": "Mz A Lt 3 Urb Los Prados de San Miguel",
+    "district": "San Miguel"
+   },
+   "expect": {
+    "urbanization": "URBANIZACION LOS PRADOS DE SAN MIGUEL"
+   },
+   "flags_absent": [
+    "DISTRICT_REMOVED_FROM_URBANIZATION"
+   ]
+  },
+  {
+   "name": "casa_con_descripcion_es_referencia",
+   "input": {
+    "address": "Los Sauces 615 casa de 2 pisos verde",
+    "district": "Ventanilla"
+   },
+   "expect": {
+    "street_name": "LOS SAUCES",
+    "number": "615",
+    "interior": ""
+   }
+  },
+  {
+   "name": "casa_con_valor_es_interior",
+   "input": {
+    "address": "Calle Menorca 140 Casa 5",
+    "district": "La Molina"
+   },
+   "expect": {
+    "street_name": "MENORCA",
+    "number": "140",
+    "interior": "CASA 5"
+   }
+  },
+  {
+   "name": "tienda_con_descripcion_no_es_interior",
+   "input": {
+    "address": "Av Pardo 233, Tienda de ropa",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "street_name": "PARDO",
+    "number": "233",
+    "interior": ""
+   }
+  },
+  {
+   "name": "torre_con_descripcion_no_es_interior",
+   "input": {
+    "address": "Av. Javier Prado 980 - Torre de oficinas",
+    "district": "San Isidro"
+   },
+   "expect": {
+    "street_name": "JAVIER PRADO",
+    "number": "980",
+    "interior": ""
+   }
+  },
+  {
+   "name": "sotano_es_interior",
+   "input": {
+    "address": "Av. Primavera 1450 Sotano 2",
+    "district": "Surco"
+   },
+   "expect": {
+    "street_name": "PRIMAVERA",
+    "number": "1450",
+    "interior": "SOTANO 2"
+   }
+  },
+  {
+   "name": "numero_repetido_no_es_interior",
+   "input": {
+    "address": "Jr. Los Mirlos 912 912",
+    "district": "Comas"
+   },
+   "expect": {
+    "street_name": "LOS MIRLOS",
+    "number": "912",
+    "interior": ""
+   },
+   "flags_contain": [
+    "REPEATED_NUMBER"
+   ],
+   "flags_absent": [
+    "INTERIOR_FROM_BARE_NUMBER"
+   ]
+  },
+  {
+   "name": "unidad_repetida_una_vez",
+   "input": {
+    "address": "Calle Bolivar 410 Dpto 603 Apt Dpto 603",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "street_name": "BOLIVAR",
+    "number": "410",
+    "interior": "DPTO 603"
+   }
+  },
+  {
+   "name": "valor_de_lote_repetido",
+   "input": {
+    "address": "Urb. Las Gaviotas Mz. B12 Lote 9, 9",
+    "district": "Surco"
+   },
+   "expect": {
+    "block": "B12",
+    "lot": "9",
+    "urbanization": "URBANIZACION LAS GAVIOTAS"
+   }
+  },
+  {
+   "name": "departamento_de_letra",
+   "input": {
+    "address": "Jr Huaraz 512 departamento de C",
+    "district": "Breña"
+   },
+   "expect": {
+    "street_name": "HUARAZ",
+    "number": "512",
+    "interior": "DPTO C"
+   }
+  },
+  {
+   "name": "establecimiento_antes_de_la_via",
+   "input": {
+    "address": "MEGA PLAZA-AV. LOS ANDES 300",
+    "district": "Independencia"
+   },
+   "expect": {
+    "street_type": "AVENIDA",
+    "street_name": "LOS ANDES",
+    "number": "300"
+   },
+   "flags_contain": [
+    "ESTABLISHMENT_PREFIX"
+   ]
+  },
+  {
+   "name": "urbanizacion_antes_de_la_via_no_es_establecimiento",
+   "input": {
+    "address": "Urb. Los Pinos - Av. Central 120",
+    "district": "Ate"
+   },
+   "expect": {
+    "street_name": "CENTRAL",
+    "number": "120",
+    "urbanization": "URBANIZACION LOS PINOS"
+   },
+   "flags_absent": [
+    "ESTABLISHMENT_PREFIX"
+   ]
+  },
+  {
+   "name": "postal_en_medio_y_pais",
+   "input": {
+    "address": "Calle Los Olmos 455 Lima 15074 Perú",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "street_name": "LOS OLMOS",
+    "number": "455"
+   },
+   "flags_contain": [
+    "POSTAL_CODE_IN_TEXT",
+    "COUNTRY_REMOVED"
+   ]
+  },
+  {
+   "name": "distrito_postal_antiguo",
+   "input": {
+    "address": "Av Colonial 1840, Lima 1",
+    "district": "Lima"
+   },
+   "expect": {
+    "street_name": "COLONIAL",
+    "number": "1840"
+   },
+   "flags_contain": [
+    "POSTAL_CODE_IN_TEXT"
+   ]
+  },
+  {
+   "name": "lugar_sin_marcador_tras_mz_lt",
+   "input": {
+    "address": "Av Los Rosales Mz H Lote 4 La Esperanza II",
+    "district": "El Agustino"
+   },
+   "expect": {
+    "block": "H",
+    "lot": "4",
+    "urbanization": "LA ESPERANZA II"
+   },
+   "flags_contain": [
+    "URBANIZATION_WITHOUT_MARKER"
+   ]
+  },
+  {
+   "name": "via_sin_tipo_tras_mz_lt",
+   "input": {
+    "address": "Mz. K3 lote 11 Los Jazmines 240 Urb Santa Elena",
+    "district": "San Martin de Porres"
+   },
+   "expect": {
+    "street_name": "LOS JAZMINES",
+    "number": "240",
+    "block": "K3",
+    "lot": "11",
+    "urbanization": "URBANIZACION SANTA ELENA"
+   }
+  },
+  {
+   "name": "distrito_al_inicio",
+   "input": {
+    "address": "Villa El Salvador Sector 5 grupo 2 manzana c lote 9",
+    "district": "Villa El Salvador"
+   },
+   "expect": {
+    "street_name": "",
+    "block": "C",
+    "lot": "9",
+    "urbanization": "SECTOR 5 GRUPO 2"
+   },
+   "flags_contain": [
+    "DISTRICT_PREFIX_REMOVED"
+   ]
+  },
+  {
+   "name": "sn_sin_barra_es_sin_numero",
+   "input": {
+    "address": "Jr. Los Andes sn - Torre 2 Dpto 410",
+    "district": "Lima"
+   },
+   "expect": {
+    "street_name": "LOS ANDES",
+    "number": "S/N",
+    "interior": "TORRE 2 DPTO 410"
+   }
+  },
+  {
+   "name": "sn_abreviatura_de_san_se_conserva",
+   "input": {
+    "address": "Av. Sn Martin 120",
+    "district": "Pueblo Libre"
+   },
+   "expect": {
+    "street_name": "SAN MARTIN",
+    "number": "120"
+   }
+  },
+  {
+   "name": "codigo_de_unidad_tras_condominio",
+   "input": {
+    "address": "Jr. Los Cedros 120 Condominio Las Palmas B-204-Surco",
+    "district": "Santiago de Surco"
+   },
+   "expect": {
+    "street_name": "LOS CEDROS",
+    "number": "120",
+    "interior": "B204",
+    "urbanization": "CONDOMINIO LAS PALMAS"
+   }
+  },
+  {
+   "name": "casa_dentro_del_nombre_de_urbanizacion",
+   "input": {
+    "address": "Pasaje 2 Mz D Lote 5 Urb. Casa del Pescador",
+    "district": "Chorrillos"
+   },
+   "expect": {
+    "block": "D",
+    "lot": "5",
+    "urbanization": "URBANIZACION CASA DEL PESCADOR"
    }
   }
  ]

@@ -48,17 +48,21 @@ En modo solo texto, la mayoría de las direcciones no trae el distrito escrito, 
 
 ## Etiquetado de 200 direcciones (2026-10-03)
 
-Se etiquetaron 200 direcciones de Lima y Callao con `scripts/emsd/planilla_etiquetado.py`. **La revisión la hizo un LLM (ChatGPT), no una persona**, así que estas etiquetas son "plata": sirven para encontrar fallos y medir el avance, no para declarar la exactitud real. Quedan 184 evaluables: 97 correctas y 87 corregidas. Otras 14 son dudosas y 2 no son direcciones. La revisión siguió la instrucción de la planilla, que tenía dos huecos: no contemplaba `S/N` (se restauró al importar) y llevó a suponer "DPTO" para interiores sin marcador.
+Se etiquetaron 200 direcciones de Lima y Callao con `scripts/emsd/planilla_etiquetado.py`. La primera pasada la hizo un LLM (ChatGPT). Después Claude revisó cada etiqueta contra el texto original, aplicando `docs/convenciones-etiquetado.md`: corrigió 43 filas y dejó 16 como DUDOSO a la espera de que una persona con conocimiento local las resuelva. **Ninguna etiqueta tiene todavía revisión humana completa**, así que estas etiquetas son "plata": sirven para encontrar fallos y medir el avance, no para declarar la exactitud real. Quedan 184 evaluables: 97 correctas y 87 corregidas. Otras 14 son dudosas y 2 no son direcciones. La revisión siguió la instrucción de la planilla, que tenía dos huecos: no contemplaba `S/N` (se restauró al importar) y llevó a suponer "DPTO" para interiores sin marcador.
 
-| Normalizador | G1 dev (138) | G1 test (46) | Ubigeo equivocado |
-|---|---:|---:|---:|
-| 0.6.0 | 52.9 % | 54.3 % | 2 en dev |
-| 0.7.0 | 68.1 % | 58.7 % | 0 |
+| Normalizador | Etiquetas | G1 dev | G1 test | Ubigeo equivocado |
+|---|---|---:|---:|---:|
+| 0.6.0 | ChatGPT (184) | 52.9 % | 54.3 % | 2 en dev |
+| 0.7.0 | ChatGPT (184) | 68.1 % | 58.7 % | 0 |
+| 0.7.0 | revisadas (180) | 77.0 % | 64.4 % | 0 |
+| 0.8.0 | revisadas (180) | 96.3 % | **75.6 %** | 0 |
+
+**La cifra que estima la exactitud real del parseo es la de test: 75.6 %, sobre solo 45 filas (margen de unos ±12 puntos).** Dev llega a 96 % porque las reglas se ajustaron mirando esas filas; la distancia entre dev y test es el sobreajuste. La ubicación es más sólida: 0 ubigeos equivocados en las 180 filas, y en la muestra completa (600) el ubigeo coincide con el de EMS-D en el 98.7 %. Las 5 diferencias son el campo genérico "LIMA" frente al distrito escrito en el texto (3), la discrepancia `200116` de EMS-D (1) y una ambigüedad en Piura (1).
 
 Los cambios de 0.7.0 salieron de los fallos de **dev**. La partición test se usa solo para medir: que suba menos que dev indica cuánto se ajustó mirando dev.
 
 Lo que más pesa en los fallos que quedan:
-- **El interior sin marcador** ("315 708"): la etiqueta dice "DPTO 708" y el normalizador "708". Es una convención que hay que decidir.
+- **El interior sin marcador** ("315 708"): se resolvió por convención como "708" tal cual.
 - **El nombre de la vía que arrastra texto libre**: edificios, locales, indicaciones.
 - **Ambigüedades reales** que necesitan un criterio humano, como dos números seguidos separados por coma o guion.
 

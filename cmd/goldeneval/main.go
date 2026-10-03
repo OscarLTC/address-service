@@ -108,7 +108,7 @@ type failure struct {
 }
 
 func main() {
-	goldenPaths := flag.String("golden", "goldenset/golden_v1.csv,goldenset/golden_mzlt_v1.csv", "datasets de oro, separados por coma")
+	goldenPaths := flag.String("golden", "goldenset/golden_v1.csv,goldenset/golden_mzlt_v2.csv", "datasets de oro, separados por coma")
 	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas)")
 	examples := flag.Int("examples", 25, "ejemplos de fallos de dev a mostrar")
 	minCore := flag.Float64("min-core", 0, "si es > 0, termina con error cuando la métrica G1 de test queda por debajo (en %)")

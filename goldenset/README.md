@@ -15,13 +15,14 @@ En la columna `notes` de cada fila sintética se listan las transformaciones apl
 
 El parseo esperado sale de las etiquetas de OSM y el ubigeo esperado sale del polígono distrital que contiene el punto (`data/geo/districts.json`). **Ninguno de los dos sale del normalizador**, para que la evaluación no sea circular.
 
-## `golden_mzlt_v1.csv`
+## `golden_mzlt_v2.csv` (y `golden_mzlt_v1.csv`, histórico)
 
 Esta es la pista de manzana y lote (`source = synthetic_mzlt`). Son direcciones sin número de puerta, armadas con Mz/Lt y el nombre real de una urbanización, AA.HH., asociación, cooperativa, condominio o sector tomado de OpenStreetMap: hasta 15 por distrito y 2 variantes por área. Se combinan en cuatro órdenes (`Mz Lt Urb`, `Urb Mz Lt`, `Vía Mz Lt Urb`, `Urb Vía Mz Lt`) y se escriben con las formas que se usan en Lima (`Mza.`, `MzB`, `Lote`, `AA.HH.`, `A.H.`, `P.J.`, `Asoc.`…). Algunas filas llevan una referencia entre paréntesis.
 
 - La urbanización esperada es el marcador canónico más el nombre. Los ordinales pasan a dígito solo antes de `Etapa`, `Sector`, `Zona` o `Grupo`, así que "Primera Etapa" se vuelve "1 ETAPA" pero "Quinta Heren" se queda como está.
 - Se descartan los nombres que cambiarían el parseo de verdad: los que coinciden con un distrito del país, los que contienen una unidad, una referencia, una vía o un marcador abreviado, y los que llevan paréntesis.
 - La coordenada es el centro del área (`osm_area_center`), es decir, precisión de zona y no de puerta.
+- La v2 excluye además los nombres que contienen su propio distrito sin un conector delante ("Unidad La Perla" en La Perla). Según `docs/convenciones-etiquetado.md`, ese distrito es la ubicación, así que el nombre no sirve de verdad. La v1 se conserva sin cambios como histórico; el evaluador usa la v2.
 
 ## Partición y test congelado
 

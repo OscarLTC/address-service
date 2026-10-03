@@ -123,6 +123,33 @@ func parseArea(name string, cat *catalog.Catalog) (marker string, words []string
 	return marker, words, ""
 }
 
+// containsOwnDistrict indica si el nombre contiene el distrito donde está el área sin
+// un conector delante ("Unidad La Perla" en La Perla). Según las convenciones de
+// etiquetado ese distrito es la ubicación, así que el nombre no sirve de verdad.
+func containsOwnDistrict(words []string, e *catalog.Entry) bool {
+	if e == nil {
+		return false
+	}
+	keys := strings.Fields(txt.Key(strings.Join(words, " ")))
+	names := []string{e.DistrictKey}
+	for _, a := range e.Aliases {
+		names = append(names, txt.Key(a))
+	}
+	connectors := map[string]bool{"DE": true, "DEL": true, "LA": true, "LAS": true, "LOS": true, "EL": true, "Y": true}
+	for j := 1; j < len(keys); j++ {
+		if connectors[keys[j-1]] {
+			continue
+		}
+		for _, nm := range names {
+			w := strings.Fields(nm)
+			if j+len(w) <= len(keys) && strings.Join(keys[j:j+len(w)], " ") == nm {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func equalWords(a, b []string) bool {
 	for i := range a {
 		if txt.NoEnye(a[i]) != b[i] {
@@ -154,6 +181,10 @@ func loadAreas(path string, cat *catalog.Catalog, index *geo.Districts) ([]area,
 		codes := index.Locate(geo.Point{lng, lat})
 		if len(codes) != 1 {
 			st.dropped["fuera_o_en_borde"]++
+			continue
+		}
+		if containsOwnDistrict(words, cat.ByCode(codes[0])) {
+			st.dropped["nombre_con_su_distrito"]++
 			continue
 		}
 		a := area{osmID: e.Type[:1] + strconv.FormatInt(e.ID, 10), marker: marker, words: words, ubigeo: codes[0], lat: lat, lng: lng}
