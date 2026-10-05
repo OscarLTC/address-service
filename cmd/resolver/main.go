@@ -1,16 +1,26 @@
-// Comando resolver: plano de datos. Expone /v1/normalize y, si hay un snapshot,
-// /v1/geocode. Responde solo desde memoria: no consulta la base de datos por request.
+// Comando resolver: plano de datos. Expone /v1/normalize, /v1/geocode y
+// /v1/geocode/batch (si hay snapshot), más /healthz, /readyz y /metrics. Responde
+// solo desde memoria: no consulta la base de datos por request.
+//
+//	go run ./cmd/resolver -snapshot data/snapshot/lima.snap
+//	go run ./cmd/resolver -hash-key <api-key>    # hash para el archivo de API keys
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
+	"addrsvc/internal/api"
 	"addrsvc/internal/catalog"
 	"addrsvc/internal/geo"
 	"addrsvc/internal/normalizer"
@@ -18,40 +28,38 @@ import (
 	"addrsvc/internal/snapshot"
 )
 
-type geocodeRequest struct {
-	ExternalID string `json:"external_id,omitempty"`
-	normalizer.Request
-}
-
-type geocodeResponse struct {
-	ExternalID string `json:"external_id,omitempty"`
-	resolver.Result
-	DatasetVersion string `json:"dataset_version"`
-	ProcessingUS   int64  `json:"processing_us"`
-}
-
-type normalizeResponse struct {
-	normalizer.Result
-	ProcessingUS int64 `json:"processing_us"`
-}
-
 func main() {
 	addr := flag.String("addr", ":8080", "dirección de escucha")
-	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas)")
-	snapPath := flag.String("snapshot", "data/snapshot/lima.snap", "snapshot del resolver (sin él, /v1/geocode no se expone)")
+	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas, geo)")
+	snapPath := flag.String("snapshot", "data/snapshot/lima.snap", "snapshot del resolver (sin él, /v1/geocode responde 503)")
+	keysPath := flag.String("api-keys", os.Getenv("API_KEYS_FILE"), "JSON {sha256(api key): cliente}; vacío = sin autenticación (solo desarrollo)")
+	rate := flag.Float64("rate", 0, "solicitudes por segundo por cliente (0 = sin límite)")
+	maxBatch := flag.Int("max-batch", 5000, "máximo de direcciones por lote")
+	eventsPath := flag.String("events", "", "archivo NDJSON de eventos de resolución (vacío = no se registran)")
+	hashKey := flag.String("hash-key", "", "imprime el hash de una API key y termina")
 	flag.Parse()
+
+	if *hashKey != "" {
+		fmt.Println(api.HashKey(*hashKey))
+		return
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	fatal := func(msg string, err error) {
+		logger.Error(msg, "error", err)
+		os.Exit(1)
+	}
 
 	cat, err := catalog.Load(filepath.Join(*dataDir, "catalog", "ubigeos.json"))
 	if err != nil {
-		log.Fatalf("catálogo: %v", err)
+		fatal("catálogo", err)
 	}
 	lex, err := normalizer.LoadLexicon(filepath.Join(*dataDir, "rules", "lexicon.json"))
 	if err != nil {
-		log.Fatalf("léxico: %v", err)
+		fatal("léxico", err)
 	}
 	zones, err := normalizer.LoadZones(filepath.Join(*dataDir, "config", "zones.json"))
 	if err != nil {
-		log.Fatalf("zonas: %v", err)
+		fatal("zonas", err)
 	}
 	norm := normalizer.New(cat, lex, normalizer.Options{
 		ActiveZones:       zones,
@@ -59,60 +67,56 @@ func main() {
 		DefaultProvince:   os.Getenv("DEFAULT_PROVINCE"),
 	})
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok", "ubigeos": cat.Size(), "version": norm.VersionString(),
-		})
-	})
-	mux.HandleFunc("POST /v1/normalize", func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		var req normalizer.Request
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "JSON inválido"})
-			return
-		}
-		start := time.Now()
-		res := norm.Normalize(req)
-		writeJSON(w, http.StatusOK, normalizeResponse{Result: res, ProcessingUS: time.Since(start).Microseconds()})
-	})
-
+	cfg := api.Config{Normalizer: norm, RatePerSecond: *rate, MaxBatch: *maxBatch, Logger: logger}
 	if snap, err := snapshot.Load(*snapPath); err != nil {
-		log.Printf("sin snapshot (%v): /v1/geocode no disponible", err)
+		logger.Warn("sin snapshot: /v1/geocode responde 503", "error", err)
 	} else {
 		districts, err := geo.LoadDistricts(filepath.Join(*dataDir, "geo", "districts.json"))
 		if err != nil {
-			log.Fatalf("límites: %v", err)
+			fatal("límites", err)
 		}
-		res := resolver.New(norm, snap, districts.Centroids())
-		log.Printf("snapshot %s: %d calles", snap.Version, len(snap.Streets))
-		mux.HandleFunc("POST /v1/geocode", func(w http.ResponseWriter, r *http.Request) {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			var req geocodeRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "JSON inválido"})
-				return
-			}
-			start := time.Now()
-			out := res.Geocode(req.Request)
-			writeJSON(w, http.StatusOK, geocodeResponse{ExternalID: req.ExternalID, Result: out,
-				DatasetVersion: res.Version(), ProcessingUS: time.Since(start).Microseconds()})
-		})
+		cfg.Resolver = resolver.New(norm, snap, districts.Centroids())
+		logger.Info("snapshot cargado", "version", snap.Version, "calles", len(snap.Streets))
+	}
+	if *keysPath != "" {
+		data, err := os.ReadFile(*keysPath)
+		if err != nil {
+			fatal("api keys", err)
+		}
+		if err := json.Unmarshal(data, &cfg.KeyHashes); err != nil {
+			fatal("api keys", err)
+		}
+		logger.Info("autenticación activa", "clientes", len(cfg.KeyHashes))
+	} else {
+		logger.Warn("sin API keys: autenticación desactivada (solo desarrollo)")
+	}
+	if *eventsPath != "" {
+		cfg.Events, err = api.NewEventBuffer(*eventsPath, 10000)
+		if err != nil {
+			fatal("eventos", err)
+		}
 	}
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           api.New(cfg).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 	}
-	log.Printf("escuchando en %s (%s, %d ubigeos)", *addr, norm.VersionString(), cat.Size())
-	log.Fatal(srv.ListenAndServe())
-}
+	go func() {
+		logger.Info("escuchando", "addr", *addr, "version", norm.VersionString())
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fatal("servidor", err)
+		}
+	}()
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
+	cfg.Events.Close()
+	logger.Info("detenido", "eventos_descartados", cfg.Events.Dropped())
 }
