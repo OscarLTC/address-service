@@ -14,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"addrsvc/internal/txt"
 )
 
 // Umbrales de las alertas al guardar un pin (docs/plan.md, F3).
@@ -266,6 +268,7 @@ func (s *Store) Resolve(ctx context.Context, id int64, actor string, r Resolutio
 			Normalized string `json:"normalized"`
 			Version    string `json:"normalizer_version"`
 			Components struct {
+				StreetName   string `json:"street_name"`
 				Number       string `json:"number"`
 				Block        string `json:"block"`
 				Lot          string `json:"lot"`
@@ -286,6 +289,17 @@ func (s *Store) Resolve(ctx context.Context, id int64, actor string, r Resolutio
 			RETURNING id`, hex.EncodeToString(sum[:]), r.StreetID, ubi, nullable(p.Components.Number), nullable(p.Components.Block),
 			nullable(p.Components.Lot), nullable(p.Components.Urbanization), p.Normalized, p.Version).Scan(&addrID); err != nil {
 			return nil, err
+		}
+		// Si el nombre escrito no es el canónico de la calle elegida, queda como alias
+		// candidato; se promueve con confirmaciones de operadores distintos.
+		if r.StreetID != nil && p.Components.StreetName != "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO street_aliases (street_id, alias, normalized_alias, source, status, created_by, ubigeo_code)
+				SELECT s.id, $2, $3, 'operador', 'candidate', $4, s.ubigeo_code FROM streets s
+				WHERE s.id = $1 AND s.normalized_name <> $3`,
+				*r.StreetID, p.Components.StreetName, txt.Key(p.Components.StreetName), actor); err != nil {
+				return nil, err
+			}
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO observations (canonical_address_id, location, method, source_quality, author, source_ref)

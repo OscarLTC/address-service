@@ -144,3 +144,19 @@ func TestVerifiedAddressWins(t *testing.T) {
 		t.Errorf("se esperaba la dirección verificada: %+v", got)
 	}
 }
+
+// Un alias promovido por operadores resuelve como el nombre canónico.
+func TestPromotedAlias(t *testing.T) {
+	root := filepath.Join("..", "..", "data")
+	cat, _ := catalog.Load(filepath.Join(root, "catalog", "ubigeos.json"))
+	lex, _ := normalizer.LoadLexicon(filepath.Join(root, "rules", "lexicon.json"))
+	norm := normalizer.New(cat, lex, normalizer.Options{ActiveZones: map[string]bool{"LIMA_METRO": true}})
+	s := street(1, "150116", "AVENIDA", "LAS PALMERAS", [][]geo.Point{{{-77.0400, -12.0800}, {-77.0390, -12.0800}}},
+		a(100, -77.0400, -12.0800), a(120, -77.0398, -12.0800))
+	s.Aliases = []string{txt.Key("PALMERAS REALES")}
+	r := resolver.New(norm, &snapshot.Snapshot{Format: snapshot.FormatVersion, Version: "test", Streets: []snapshot.Street{s}}, nil)
+	got := r.Geocode(normalizer.Request{Address: "Av. Palmeras Reales 120", District: "Lince"})
+	if got.ResolutionType != "ALIAS" || got.StreetID != 1 || got.Decision != resolver.AutoAccept {
+		t.Errorf("se esperaba el alias promovido: %s %d %s", got.ResolutionType, got.StreetID, got.Decision)
+	}
+}

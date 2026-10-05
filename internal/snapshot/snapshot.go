@@ -37,6 +37,8 @@ type Street struct {
 	Lines    [][]geo.Point
 	Anchors  []Anchor // ordenados por número
 	Refs     []string // ways de OSM de origen
+	// Aliases son claves (txt.Key) de grafías promovidas por operadores.
+	Aliases []string
 }
 
 // Area es una urbanización, AA.HH. o asociación con nombre y centro conocido.

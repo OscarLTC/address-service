@@ -68,6 +68,7 @@ type Candidate struct {
 
 type districtIndex struct {
 	byKey   map[string][]*snapshot.Street
+	byAlias map[string][]*snapshot.Street
 	byPhon  map[string][]*snapshot.Street
 	byToken map[string][]*snapshot.Street
 	areas   map[string]*snapshot.Area
@@ -92,7 +93,7 @@ func New(norm *normalizer.Normalizer, snap *snapshot.Snapshot, centroids map[str
 	idx := func(u string) *districtIndex {
 		d := r.districts[u]
 		if d == nil {
-			d = &districtIndex{byKey: map[string][]*snapshot.Street{}, byPhon: map[string][]*snapshot.Street{},
+			d = &districtIndex{byKey: map[string][]*snapshot.Street{}, byAlias: map[string][]*snapshot.Street{}, byPhon: map[string][]*snapshot.Street{},
 				byToken: map[string][]*snapshot.Street{}, areas: map[string]*snapshot.Area{}}
 			r.districts[u] = d
 		}
@@ -102,6 +103,9 @@ func New(norm *normalizer.Normalizer, snap *snapshot.Snapshot, centroids map[str
 		s := &snap.Streets[i]
 		d := idx(s.Ubigeo)
 		d.byKey[s.Key] = append(d.byKey[s.Key], s)
+		for _, a := range s.Aliases {
+			d.byAlias[a] = append(d.byAlias[a], s)
+		}
 		d.byPhon[s.Phonetic] = append(d.byPhon[s.Phonetic], s)
 		for _, t := range strings.Fields(s.Key) {
 			if len(t) >= 3 && !stopword[t] {
@@ -221,6 +225,10 @@ func (r *Resolver) candidates(d *districtIndex, typ, name string) []candidate {
 	}
 	for _, s := range d.byKey[key] {
 		add(s, 1.0, "EXACT")
+	}
+	// Alias promovido por operadores: tan confiable como el nombre canónico.
+	for _, s := range d.byAlias[key] {
+		add(s, 0.995, "ALIAS")
 	}
 	for _, s := range d.byPhon[phon] {
 		add(s, 0.93, "PHONETIC")
@@ -404,7 +412,7 @@ func decide(c candidate, loc location, ambiguous bool, flags []string) string {
 	case loc.precision == Street && !loc.tight:
 		// Sin número ubicable en una calle larga, el punto puede estar a kilómetros.
 		return Review
-	case c.match == "EXACT" && c.score >= 0.99 && loc.tight && loc.precision != Street:
+	case (c.match == "EXACT" || c.match == "ALIAS") && c.score >= 0.99 && loc.tight && loc.precision != Street:
 		return AutoAccept
 	case c.score >= 0.8:
 		return AcceptFlagged

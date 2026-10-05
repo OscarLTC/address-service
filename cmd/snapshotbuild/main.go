@@ -152,6 +152,11 @@ func main() {
 			log.Fatalf("verificadas: %v", err)
 		}
 		log.Printf("direcciones verificadas: %d (%v)", len(verified), st)
+		promoted, total, err := b.loadAliases(*dsn)
+		if err != nil {
+			log.Fatalf("alias: %v", err)
+		}
+		log.Printf("alias: %d promovidos ahora, %d en el snapshot", promoted, total)
 	}
 
 	s := &snapshot.Snapshot{
@@ -450,6 +455,61 @@ func (b *builder) loadVerified(dsn string) ([]snapshot.Verified, map[string]int,
 		st["como_ancla"]++
 	}
 	return out, st, rows.Err()
+}
+
+// minAliasConfirmations es cuántos operadores distintos deben confirmar un alias.
+const minAliasConfirmations = 2
+
+// loadAliases promueve los alias candidatos con confirmaciones de operadores
+// distintos y sin conflicto (el mismo alias apuntando a otra calle del distrito, o
+// siendo el nombre canónico de otra calle), y suma los promovidos al snapshot.
+func (b *builder) loadAliases(dsn string) (int, int, error) {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer conn.Close(ctx)
+	tag, err := conn.Exec(ctx, `
+		WITH support AS (
+			SELECT street_id, ubigeo_code, normalized_alias, count(DISTINCT created_by) AS n
+			FROM street_aliases WHERE source = 'operador' AND status = 'candidate' GROUP BY 1, 2, 3
+		), ok AS (
+			SELECT s.* FROM support s
+			WHERE s.n >= $1
+			  AND NOT EXISTS (SELECT 1 FROM street_aliases o WHERE o.ubigeo_code = s.ubigeo_code
+			                  AND o.normalized_alias = s.normalized_alias AND o.street_id <> s.street_id AND o.status <> 'rejected')
+			  AND NOT EXISTS (SELECT 1 FROM streets t WHERE t.ubigeo_code = s.ubigeo_code
+			                  AND t.normalized_name = s.normalized_alias AND t.id <> s.street_id)
+		)
+		UPDATE street_aliases a SET status = 'promoted'
+		FROM ok WHERE a.street_id = ok.street_id AND a.normalized_alias = ok.normalized_alias AND a.status = 'candidate'`,
+		minAliasConfirmations)
+	if err != nil {
+		return 0, 0, err
+	}
+	rows, err := conn.Query(ctx, `SELECT DISTINCT street_id, normalized_alias FROM street_aliases WHERE status = 'promoted'`)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer rows.Close()
+	byID := map[int]*snapshot.Street{}
+	for _, s := range b.streets {
+		byID[s.ID] = s
+	}
+	total := 0
+	for rows.Next() {
+		var id int64
+		var alias string
+		if err := rows.Scan(&id, &alias); err != nil {
+			return 0, 0, err
+		}
+		if s := byID[int(id)]; s != nil {
+			s.Aliases = append(s.Aliases, alias)
+			total++
+		}
+	}
+	return int(tag.RowsAffected()), total, rows.Err()
 }
 
 // nearest elige la componente más cercana al punto y su distancia.

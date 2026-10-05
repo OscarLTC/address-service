@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -169,3 +170,56 @@ func TestReviewFlow(t *testing.T) {
 }
 
 func jsonNum(f float64) string { b, _ := json.Marshal(int64(f)); return string(b) }
+
+// Dos operadores distintos que eligen la misma calle para una misma grafía dejan dos
+// alias candidatos con autores distintos (la promoción la hace cmd/snapshotbuild -db).
+func TestAliasCandidates(t *testing.T) {
+	dsn := os.Getenv("ADDRSVC_TEST_DB")
+	if dsn == "" {
+		t.Skip("ADDRSVC_TEST_DB no definido")
+	}
+	ctx := context.Background()
+	store, err := NewStore(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	var sid int64
+	var lng, lat float64
+	if err := store.db.QueryRow(ctx, `SELECT s.id, ST_X(ST_PointOnSurface(g.geom)), ST_Y(ST_PointOnSurface(g.geom))
+		FROM streets s JOIN street_segments g ON g.street_id = s.id WHERE s.ubigeo_code = '150116' ORDER BY s.id LIMIT 1`).Scan(&sid, &lng, &lat); err != nil {
+		t.Skip("sin calles de Lince en la base")
+	}
+	authors := []string{"alias-prueba-a", "alias-prueba-b"}
+	cleanup := func() {
+		for _, q := range []string{
+			`DELETE FROM street_aliases WHERE created_by LIKE 'alias-prueba-%'`,
+			`DELETE FROM decision_events WHERE actor LIKE 'alias-prueba-%'`,
+			`DELETE FROM observations WHERE author LIKE 'alias-prueba-%'`,
+			`DELETE FROM review_tickets WHERE source = 'alias-prueba'`,
+			`DELETE FROM canonical_addresses c WHERE NOT EXISTS (SELECT 1 FROM observations o WHERE o.canonical_address_id = c.id)`,
+		} {
+			if _, err := store.db.Exec(ctx, q); err != nil {
+				t.Errorf("limpieza: %v", err)
+			}
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	for i, who := range authors {
+		parse := map[string]any{"normalized": "CALLE GRAFIA INVENTADA", "components": map[string]string{"street_name": "GRAFIA INVENTADA", "number": strconv.Itoa(100 + i)}}
+		id, _, err := store.UpsertTicket(ctx, NewTicket{AddressKey: "alias-prueba|" + who, Ubigeo: "150116", Raw: map[string]string{"address": "x"}, Parse: parse, Source: "alias-prueba"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Resolve(ctx, id, who, Resolution{Action: "pin", Lat: &lat, Lng: &lng, StreetID: &sid}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n, distinct int
+	store.db.QueryRow(ctx, `SELECT count(*), count(DISTINCT created_by) FROM street_aliases
+		WHERE street_id = $1 AND normalized_alias = 'GRAFIA INVENTADA' AND status = 'candidate'`, sid).Scan(&n, &distinct)
+	if n != 2 || distinct != 2 {
+		t.Errorf("alias candidatos %d (autores distintos %d), se esperaba 2 y 2", n, distinct)
+	}
+}
