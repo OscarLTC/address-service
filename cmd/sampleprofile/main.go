@@ -65,13 +65,10 @@ func main() {
 	var locF, locT = map[string]int{}, map[string]int{}
 	shape := map[string]int{}
 	for _, s := range rows {
-		addr := s.direccion
-		if s.numero != "" {
-			addr += " " + s.numero
-		}
 		o := outcome{s: s}
-		o.withF = norm.Normalize(normalizer.Request{Address: addr, District: s.distrito, Province: s.provincia, Department: s.departamento})
-		o.textOnly = norm.Normalize(normalizer.Request{Address: addr})
+		o.withF = norm.Normalize(normalizer.Request{Address: s.direccion, Number: s.numero, Reference: s.referencia,
+			District: s.distrito, Province: s.provincia, Department: s.departamento})
+		o.textOnly = norm.Normalize(normalizer.Request{Address: s.direccion, Number: s.numero})
 		all = append(all, o)
 		for _, f := range o.withF.Flags {
 			flagsF[f]++

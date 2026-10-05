@@ -12,7 +12,7 @@ import (
 )
 
 // Version identifica el conjunto de reglas del código. Súbela al cambiar el comportamiento.
-const Version = "0.8.0"
+const Version = "0.9.0"
 
 // Request es la entrada. Todos los campos de ubicación son opcionales.
 type Request struct {
@@ -21,6 +21,11 @@ type Request struct {
 	Province   string `json:"province,omitempty"`
 	Department string `json:"department,omitempty"`
 	Ubigeo     string `json:"ubigeo,omitempty"`
+	// Number es el número de puerta cuando el sistema de origen lo manda aparte.
+	Number string `json:"number,omitempty"`
+	// Reference es la referencia enviada aparte ("frente al parque"). No se parsea:
+	// se suma a la referencia del resultado.
+	Reference string `json:"reference,omitempty"`
 }
 
 // Components son las partes de la dirección ya separadas.
@@ -185,6 +190,10 @@ func (n *Normalizer) Normalize(req Request) Result {
 
 	res.Location = n.locate(req, sres, flags)
 	n.parse(tokens, &res, flags)
+	n.applyNumberField(req.Number, &res, flags)
+	if ref := txt.Collapse(rePunct.ReplaceAllString(txt.Fold(req.Reference, true), " ")); ref != "" {
+		refs = append(refs, ref)
+	}
 	if res.Location.Source == "NONE" && n.districtInName(res.Components.Urbanization) {
 		flags.add("DISTRICT_NAME_IN_URBANIZATION")
 	}
@@ -286,6 +295,32 @@ func (n *Normalizer) stripPrefix(tokens []string, sepBefore []bool, req Request,
 		break
 	}
 	return tokens, sepBefore
+}
+
+// applyNumberField usa el número enviado aparte si el texto no trae uno. Si el texto
+// trae otro número, se conserva el del texto y se marca el conflicto.
+func (n *Normalizer) applyNumberField(field string, res *Result, flags *flagSet) {
+	f := strings.ReplaceAll(txt.Collapse(rePunct.ReplaceAllString(txt.Fold(field, true), " ")), " ", "")
+	switch {
+	case f == "":
+		return
+	case f == "SN" || f == "SINNUMERO" || f == "0":
+		f = "S/N"
+	case !reNumber.MatchString(f):
+		flags.add("NUMBER_FIELD_INVALID")
+		return
+	}
+	c := &res.Components
+	switch {
+	case c.Number == "":
+		c.Number = f
+		flags.add("NUMBER_FROM_FIELD")
+		if f != "S/N" {
+			flags.remove("NO_NUMBER")
+		}
+	case c.Number != f:
+		flags.add("NUMBER_FIELD_CONFLICT")
+	}
 }
 
 // districtGiven indica si la petición trae el distrito en un campo o por ubigeo.

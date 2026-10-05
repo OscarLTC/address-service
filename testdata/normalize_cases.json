@@ -1674,6 +1674,51 @@
     "lot": "5",
     "urbanization": "URBANIZACION CASA DEL PESCADOR"
    }
+  },
+  {
+   "name": "numero_en_campo_aparte",
+   "input": {
+    "address": "Av. Los Fresnos",
+    "number": "1420",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "street_name": "LOS FRESNOS",
+    "number": "1420",
+    "normalized": "AVENIDA LOS FRESNOS 1420"
+   },
+   "flags_contain": [
+    "NUMBER_FROM_FIELD"
+   ],
+   "flags_absent": [
+    "NO_NUMBER"
+   ]
+  },
+  {
+   "name": "numero_en_campo_que_contradice_el_texto",
+   "input": {
+    "address": "Av. Los Fresnos 1420",
+    "number": "1240",
+    "district": "Miraflores"
+   },
+   "expect": {
+    "number": "1420"
+   },
+   "flags_contain": [
+    "NUMBER_FIELD_CONFLICT"
+   ]
+  },
+  {
+   "name": "referencia_en_campo_aparte",
+   "input": {
+    "address": "Jr. Las Begonias 230",
+    "reference": "Frente al parque",
+    "district": "Lince"
+   },
+   "expect": {
+    "number": "230",
+    "reference": "FRENTE AL PARQUE"
+   }
   }
  ]
 }
