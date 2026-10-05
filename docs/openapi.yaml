@@ -1,0 +1,218 @@
+openapi: 3.1.0
+info:
+  title: Address Intelligence Service (Lima)
+  version: 0.1.0
+  description: |
+    Normaliza y resuelve direcciones peruanas. Cada respuesta indica qué tan fina es
+    la coordenada (`precision_level`), separado de la decisión por riesgo (`decision`).
+    Cuando el servicio no está seguro no adivina: responde `REVIEW_REQUIRED`.
+
+    El `score` todavía **no está calibrado**: ordena candidatos, pero no es una
+    probabilidad (docs/plan.md, Apéndice C).
+servers:
+  - url: http://localhost:8080
+security:
+  - apiKey: []
+paths:
+  /v1/normalize:
+    post:
+      summary: Normaliza una dirección (sin geolocalizar)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddressRequest' }
+      responses:
+        '200':
+          description: Dirección normalizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NormalizeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/geocode:
+    post:
+      summary: Resuelve una dirección a una coordenada
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GeocodeRequest' }
+      responses:
+        '200':
+          description: Resultado de la resolución (incluye REVIEW_REQUIRED y OUT_OF_SCOPE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GeocodeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { description: Sin snapshot cargado }
+  /v1/geocode/batch:
+    post:
+      summary: Resuelve un lote síncrono
+      description: |
+        Responde NDJSON: una línea `GeocodeResponse` por dirección, en el orden de
+        entrada. Las direcciones repetidas se resuelven una vez (cabecera
+        `X-Batch-Unique`). Con `Idempotency-Key`, repetir la solicitud devuelve la
+        misma respuesta (cabecera `Idempotent-Replay: true`).
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items: { $ref: '#/components/schemas/GeocodeRequest' }
+      responses:
+        '200':
+          description: NDJSON de GeocodeResponse
+          content:
+            application/x-ndjson:
+              schema: { $ref: '#/components/schemas/GeocodeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /healthz:
+    get:
+      summary: El proceso está vivo
+      security: []
+      responses: { '200': { description: OK } }
+  /readyz:
+    get:
+      summary: El snapshot está cargado (listo para recibir tráfico)
+      security: []
+      responses:
+        '200': { description: Listo }
+        '503': { description: Sin snapshot }
+  /metrics:
+    get:
+      summary: Métricas en formato de texto de Prometheus
+      security: []
+      responses: { '200': { description: OK } }
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  responses:
+    BadRequest:
+      description: JSON inválido o lote fuera de rango
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: API key inválida o ausente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: Límite de solicitudes del cliente excedido (ver Retry-After)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+    AddressRequest:
+      type: object
+      required: [address]
+      description: |
+        La ubicación puede venir en campos separados, concatenada en `address` o
+        mezclada. Precedencia: `ubigeo` > campos coherentes > sufijo del texto.
+      properties:
+        address: { type: string, example: 'Clle. Los Sáuces #245, Ate' }
+        number: { type: string, description: Número de puerta si el origen lo manda aparte }
+        reference: { type: string, description: Referencia enviada aparte (no se parsea) }
+        district: { type: string }
+        province: { type: string }
+        department: { type: string }
+        ubigeo: { type: string, pattern: '^\d{6}$' }
+    GeocodeRequest:
+      allOf:
+        - $ref: '#/components/schemas/AddressRequest'
+        - type: object
+          properties:
+            external_id: { type: string, description: Se devuelve tal cual (pedido, guía) }
+    Components:
+      type: object
+      properties:
+        street_type: { type: string, example: CALLE }
+        street_name: { type: string, example: LOS SAUCES }
+        number: { type: string, example: '245' }
+        interior: { type: string, example: DPTO 302 }
+        block: { type: string, description: Manzana }
+        lot: { type: string, description: Lote }
+        urbanization: { type: string, example: URBANIZACION LOS ROSALES }
+        reference: { type: string }
+    Location:
+      type: object
+      properties:
+        department: { type: string }
+        province: { type: string }
+        district: { type: string }
+        ubigeo: { type: string }
+        zone: { type: string }
+        in_scope: { type: boolean }
+        source: { type: string, enum: [UBIGEO, FIELD, TEXT, DEFAULT, NONE] }
+    NormalizeResponse:
+      type: object
+      properties:
+        raw: { type: string }
+        normalized: { type: string, example: CALLE LOS SAUCES 245 }
+        components: { $ref: '#/components/schemas/Components' }
+        location: { $ref: '#/components/schemas/Location' }
+        match_key: { type: string }
+        phonetic_key: { type: string }
+        flags:
+          type: array
+          items: { type: string }
+          description: Todo lo ambiguo o aplicado con cautela (DISTRICT_CONFLICT, AMBIGUOUS_LIMA, NUMBER_FROM_FIELD…)
+        normalizer_version: { type: string }
+        processing_us: { type: integer }
+    GeocodeResponse:
+      type: object
+      properties:
+        external_id: { type: string }
+        status: { type: string, enum: [RESOLVED, REVIEW_REQUIRED, UNRESOLVED, OUT_OF_SCOPE] }
+        decision: { type: string, enum: [AUTO_ACCEPT, ACCEPT_FLAGGED, REVIEW, REJECT] }
+        ubigeo: { type: string }
+        street_id: { type: integer }
+        canonical_address: { type: string }
+        location:
+          type: object
+          properties:
+            lat: { type: number }
+            lng: { type: number }
+        precision_level: { type: string, enum: [ADDRESS_POINT, SEGMENT_INTERPOLATED, STREET, ZONE, DISTRICT] }
+        score: { type: number, description: No calibrado }
+        resolution_type: { type: string, enum: [EXACT, PHONETIC, FUZZY, AREA_MATCH, DISTRICT_CENTROID] }
+        flags:
+          type: array
+          items: { type: string }
+        candidates:
+          type: array
+          items:
+            type: object
+            properties:
+              street_id: { type: integer }
+              name: { type: string }
+              score: { type: number }
+              match: { type: string }
+        normalized: { $ref: '#/components/schemas/NormalizeResponse' }
+        reason: { type: string }
+        dataset_version: { type: string }
+        processing_us: { type: integer }

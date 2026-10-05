@@ -1,0 +1,6 @@
+data/private
+data/osm
+data/snapshot
+.git
+goldenset
+docs
