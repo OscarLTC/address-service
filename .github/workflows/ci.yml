@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgis:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_DB: addrsvc
+          POSTGRES_USER: addrsvc
+          POSTGRES_PASSWORD: addrsvc
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U addrsvc -d addrsvc"
+          --health-interval 5s --health-retries 10
+    env:
+      ADDRSVC_TEST_DB: postgres://addrsvc:addrsvc@localhost:5432/addrsvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Formato
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: Vet
+        run: go vet ./...
+      - name: Migraciones
+        run: for f in migrations/*.sql; do psql "$ADDRSVC_TEST_DB" -v ON_ERROR_STOP=1 -f "$f"; done
+      - name: Pruebas
+        # Las pruebas que necesitan calles cargadas o el snapshot de OSM se omiten
+        # solas: data/osm y data/snapshot no se versionan.
+        run: go test ./...
+      - name: Compuerta del dataset de oro (G1 >= 95 % en test)
+        run: go run ./cmd/goldeneval -golden goldenset/golden_v1.csv,goldenset/golden_mzlt_v2.csv -min-core 95 -examples 0
+      - name: Imagen del resolver
+        run: docker build -t addrsvc-resolver .

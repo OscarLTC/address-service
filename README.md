@@ -2,6 +2,8 @@
 
 Servicio para normalizar y resolver direcciones peruanas. Este repositorio es el **arranque desde cero**: hoy contiene la Fase 1 del plan (normalizador determinístico + endpoint `/v1/normalize`) y la guía para conseguir los datos que faltan.
 
+- **Estado y bloqueos: [`docs/estado.md`](docs/estado.md)**
+- Operación: [`docs/runbook.md`](docs/runbook.md) · API: [`docs/openapi.yaml`](docs/openapi.yaml)
 - Plan completo: [`docs/plan.md`](docs/plan.md)
 - Qué necesitas y en qué orden: [`docs/SETUP.md`](docs/SETUP.md)
 - Decisiones de arquitectura: [`docs/adr/`](docs/adr/)
