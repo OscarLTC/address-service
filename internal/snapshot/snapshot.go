@@ -6,7 +6,9 @@ package snapshot
 
 import (
 	"compress/gzip"
+	"crypto/sha256"
 	"encoding/gob"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"sort"
@@ -15,7 +17,7 @@ import (
 )
 
 // FormatVersion cambia cuando cambia la estructura serializada.
-const FormatVersion = 1
+const FormatVersion = 2
 
 // Anchor es un punto con número de puerta conocido sobre una calle.
 type Anchor struct {
@@ -45,13 +47,31 @@ type Area struct {
 	Point  geo.Point
 }
 
+// Verified es una dirección con coordenada verificada (pin de operador o GPS de
+// entrega validado). KeyHash es sha256(match_key + "|" + ubigeo) en hex, el mismo
+// address_hash de canonical_addresses.
+type Verified struct {
+	KeyHash string
+	Ubigeo  string
+	Point   geo.Point
+	Method  string // pin_operador | gps_entrega
+	Ref     string // p. ej. "obs:123"
+}
+
 // Snapshot es el contenido completo de una versión.
 type Snapshot struct {
-	Format  int
-	Version string
-	Meta    map[string]string
-	Streets []Street
-	Areas   []Area
+	Format   int
+	Version  string
+	Meta     map[string]string
+	Streets  []Street
+	Areas    []Area
+	Verified []Verified
+}
+
+// AddressKeyHash calcula la clave de una dirección verificada.
+func AddressKeyHash(matchKey, ubigeo string) string {
+	sum := sha256.Sum256([]byte(matchKey + "|" + ubigeo))
+	return hex.EncodeToString(sum[:])
 }
 
 // SortAnchors deja los anclas de cada calle ordenados por número.

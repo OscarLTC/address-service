@@ -63,6 +63,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("calles: %v", err)
 	}
+	// Los ids de calle de la base son los del snapshot: el admin verifica al arrancar
+	// que usa la misma versión.
+	if _, err := tx.Exec(ctx, `UPDATE coverage_zones SET snapshot_version = $1`, snap.Version); err != nil {
+		log.Fatalf("versión: %v", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		log.Fatal(err)
 	}
@@ -155,27 +160,39 @@ func loadZones(ctx context.Context, tx pgx.Tx, dataDir string) (int, error) {
 // loadStreets reemplaza las calles de OSM por las del snapshot. Las calles creadas por
 // operadores (source <> 'osm') no se tocan.
 func loadStreets(ctx context.Context, tx pgx.Tx, snap *snapshot.Snapshot) (int, int, int, error) {
-	for _, q := range []string{
-		`DELETE FROM anchors WHERE source = 'osm'`,
-		`DELETE FROM street_segments WHERE street_id IN (SELECT id FROM streets WHERE source = 'osm')`,
-		`DELETE FROM street_aliases WHERE street_id IN (SELECT id FROM streets WHERE source = 'osm')`,
-		`DELETE FROM streets WHERE source = 'osm'`,
-	} {
-		if _, err := tx.Exec(ctx, q); err != nil {
-			return 0, 0, 0, err
-		}
+	// Los ids son estables entre snapshots (cmd/snapshotbuild): las calles se actualizan
+	// en su lugar y solo se borran las de OSM que ya no existen y que ninguna dirección
+	// verificada referencia.
+	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE tmp_streets (LIKE streets INCLUDING DEFAULTS) ON COMMIT DROP`); err != nil {
+		return 0, 0, 0, err
 	}
 	rows := make([][]any, 0, len(snap.Streets))
 	for _, s := range snap.Streets {
 		rows = append(rows, []any{int64(s.ID), s.Ubigeo, s.Type, s.Name, s.Key, s.Phonetic, "osm", strings.Join(s.Refs, " ")})
 	}
-	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"streets"},
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"tmp_streets"},
 		[]string{"id", "ubigeo_code", "street_type", "canonical_name", "normalized_name", "phonetic_name", "source", "source_ref"},
 		pgx.CopyFromRows(rows)); err != nil {
 		return 0, 0, 0, err
 	}
-	if _, err := tx.Exec(ctx, `SELECT setval('streets_id_seq', (SELECT max(id) FROM streets))`); err != nil {
-		return 0, 0, 0, err
+	for _, q := range []string{
+		`INSERT INTO streets (id, ubigeo_code, street_type, canonical_name, normalized_name, phonetic_name, source, source_ref)
+		 SELECT id, ubigeo_code, street_type, canonical_name, normalized_name, phonetic_name, source, source_ref FROM tmp_streets
+		 ON CONFLICT (id) DO UPDATE SET ubigeo_code = EXCLUDED.ubigeo_code, street_type = EXCLUDED.street_type,
+		   canonical_name = EXCLUDED.canonical_name, normalized_name = EXCLUDED.normalized_name,
+		   phonetic_name = EXCLUDED.phonetic_name, source_ref = EXCLUDED.source_ref`,
+		`DELETE FROM anchors WHERE source = 'osm'`,
+		`DELETE FROM street_segments WHERE street_id IN (SELECT id FROM streets WHERE source = 'osm')`,
+		`DELETE FROM street_aliases s WHERE NOT EXISTS (SELECT 1 FROM tmp_streets t WHERE t.id = s.street_id)
+		   AND s.street_id IN (SELECT id FROM streets WHERE source = 'osm')`,
+		`DELETE FROM streets s WHERE source = 'osm' AND NOT EXISTS (SELECT 1 FROM tmp_streets t WHERE t.id = s.id)
+		   AND NOT EXISTS (SELECT 1 FROM canonical_addresses c WHERE c.street_id = s.id)
+		   AND NOT EXISTS (SELECT 1 FROM anchors a WHERE a.street_id = s.id)`,
+		`SELECT setval('streets_id_seq', greatest((SELECT max(id) FROM streets), 1))`,
+	} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			return 0, 0, 0, err
+		}
 	}
 
 	// Tramos y anclas: se cargan como texto WKT en tablas temporales y se convierten.

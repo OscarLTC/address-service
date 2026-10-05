@@ -1,4 +1,4 @@
-.PHONY: test run bench fmt vet catalog osm golden eval db-up snapshot geoeval
+.PHONY: test run bench fmt vet catalog osm golden eval db-up snapshot geoeval dbload control snapshot-db
 
 test:
 	go test ./...
@@ -35,3 +35,13 @@ snapshot:
 
 geoeval:
 	go run ./cmd/geoeval -snapshot data/snapshot/lima.snap
+
+dbload:
+	go run ./cmd/dbload -snapshot data/snapshot/lima.snap
+
+# Snapshot con las direcciones verificadas por operadores y GPS de entrega.
+snapshot-db:
+	go run ./cmd/snapshotbuild -out data/snapshot/lima.snap -db postgres://addrsvc:addrsvc@localhost:55432/addrsvc
+
+control:
+	go run ./cmd/control -operators data/private/operators.json

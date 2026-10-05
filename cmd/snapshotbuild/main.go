@@ -13,9 +13,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"path/filepath"
@@ -24,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"addrsvc/internal/catalog"
 	"addrsvc/internal/geo"
@@ -86,6 +90,7 @@ func main() {
 	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas, geo)")
 	goldenPath := flag.String("golden", "goldenset/golden_v1.csv", "dataset de oro: sus puntos test no se usan como anclas")
 	out := flag.String("out", "data/snapshot/lima.snap", "snapshot de salida")
+	dsn := flag.String("db", "", "si se indica, suma las direcciones verificadas de la base (pin de operador y GPS de entrega oro)")
 	excludeSplit := flag.String("exclude-split", "test", "partición del dataset de oro que no se usa como ancla (test o all; all sirve para diagnosticar en dev)")
 	flag.Parse()
 
@@ -107,7 +112,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	b := &builder{norm: norm, districts: districts, groups: map[string]*group{}, byKey: map[string][]*snapshot.Street{}}
+	b := &builder{norm: norm, districts: districts, groups: map[string]*group{}, byKey: map[string][]*snapshot.Street{}, ids: map[int]bool{}}
 	files, _ := filepath.Glob(filepath.Join(*osmDir, "streets", "*.json"))
 	stamp := ""
 	for _, f := range files {
@@ -139,6 +144,16 @@ func main() {
 	snapAreas := b.areas(areas)
 	log.Printf("áreas: %d", len(snapAreas))
 
+	var verified []snapshot.Verified
+	if *dsn != "" {
+		var st map[string]int
+		verified, st, err = b.loadVerified(*dsn)
+		if err != nil {
+			log.Fatalf("verificadas: %v", err)
+		}
+		log.Printf("direcciones verificadas: %d (%v)", len(verified), st)
+	}
+
 	s := &snapshot.Snapshot{
 		Format:  snapshot.FormatVersion,
 		Version: time.Now().UTC().Format("2006-01-02T150405Z"),
@@ -148,7 +163,8 @@ func main() {
 			"normalizer_version": norm.VersionString(),
 			"anchors_excluded":   strconv.Itoa(len(excluded)) + " puntos (" + *excludeSplit + ") de " + *goldenPath,
 		},
-		Areas: snapAreas,
+		Areas:    snapAreas,
+		Verified: verified,
 	}
 	for _, st := range b.streets {
 		s.Streets = append(s.Streets, *st)
@@ -192,6 +208,7 @@ type builder struct {
 	order     []string
 	byKey     map[string][]*snapshot.Street // componentes por distrito, tipo y nombre
 	streets   []*snapshot.Street
+	ids       map[int]bool
 
 	ways, noDistrict, skipped int
 }
@@ -266,18 +283,43 @@ func (b *builder) finalize() int {
 		}
 		for _, comp := range comps {
 			st := &snapshot.Street{
-				ID: len(b.streets) + 1, Ubigeo: g.ubigeo, Type: g.typ, Name: g.display,
+				Ubigeo: g.ubigeo, Type: g.typ, Name: g.display,
 				Key: txt.Key(g.display), Phonetic: txt.Phonetic(g.display),
 			}
 			for _, i := range comp {
 				st.Lines = append(st.Lines, g.lines[i])
 				st.Refs = append(st.Refs, g.refs[i])
 			}
+			st.ID = b.stableID(st)
 			b.streets = append(b.streets, st)
 			b.byKey[k] = append(b.byKey[k], st)
 		}
 	}
 	return split
+}
+
+// stableID deriva el id de la calle del distrito, el tipo, el nombre y el way de OSM
+// más antiguo de la componente: así el id no cambia entre construcciones y las
+// direcciones verificadas siguen apuntando a la misma calle. Las colisiones se
+// resuelven con el siguiente id libre.
+func (b *builder) stableID(s *snapshot.Street) int {
+	minRef := ""
+	for _, r := range s.Refs {
+		if minRef == "" || len(r) < len(minRef) || (len(r) == len(minRef) && r < minRef) {
+			minRef = r
+		}
+	}
+	h := fnv.New64a()
+	h.Write([]byte(s.Ubigeo + "|" + s.Type + "|" + s.Key + "|" + minRef))
+	id := int(h.Sum64() >> 34) // 30 bits: entra en int y en bigint
+	if id == 0 {
+		id = 1
+	}
+	for b.ids[id] {
+		id++
+	}
+	b.ids[id] = true
+	return id
 }
 
 // components agrupa los tramos que se tocan (a joinDistance o menos).
@@ -354,6 +396,60 @@ func (b *builder) dropInconsistent() int {
 		s.Anchors = kept
 	}
 	return dropped
+}
+
+// loadVerified lee de la base la última observación oro de cada dirección canónica
+// (el pin de operador gana al GPS de entrega). Las que tienen calle y número se suman
+// además como anclas y reemplazan a las de OSM con el mismo número.
+func (b *builder) loadVerified(dsn string) ([]snapshot.Verified, map[string]int, error) {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer conn.Close(ctx)
+	rows, err := conn.Query(ctx, `
+		SELECT DISTINCT ON (ca.id) ca.address_hash, coalesce(ca.ubigeo_code,''), coalesce(ca.street_id,0),
+		       coalesce(ca.house_number,''), ST_X(o.location), ST_Y(o.location), o.method, o.id
+		FROM canonical_addresses ca JOIN observations o ON o.canonical_address_id = ca.id
+		WHERE o.source_quality = 'oro'
+		ORDER BY ca.id, (o.method = 'pin_operador') DESC, o.created_at DESC`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	byID := map[int]*snapshot.Street{}
+	for _, s := range b.streets {
+		byID[s.ID] = s
+	}
+	st := map[string]int{}
+	var out []snapshot.Verified
+	for rows.Next() {
+		var hash, ubigeo, number, method string
+		var streetID, obsID int64
+		var lng, lat float64
+		if err := rows.Scan(&hash, &ubigeo, &streetID, &number, &lng, &lat, &method, &obsID); err != nil {
+			return nil, nil, err
+		}
+		p := geo.Point{lng, lat}
+		ref := fmt.Sprintf("obs:%d", obsID)
+		out = append(out, snapshot.Verified{KeyHash: hash, Ubigeo: ubigeo, Point: p, Method: method, Ref: ref})
+		st[method]++
+		n, err := strconv.Atoi(strings.TrimRightFunc(number, func(r rune) bool { return r < '0' || r > '9' }))
+		s := byID[int(streetID)]
+		if err != nil || s == nil {
+			continue
+		}
+		kept := s.Anchors[:0]
+		for _, a := range s.Anchors {
+			if a.Number != n {
+				kept = append(kept, a)
+			}
+		}
+		s.Anchors = append(kept, snapshot.Anchor{Number: n, Point: p, Ref: ref})
+		st["como_ancla"]++
+	}
+	return out, st, rows.Err()
 }
 
 // nearest elige la componente más cercana al punto y su distancia.

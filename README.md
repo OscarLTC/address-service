@@ -11,7 +11,7 @@ Servicio para normalizar y resolver direcciones peruanas. Este repositorio es el
 Requiere Go 1.22 o superior. No hay dependencias externas.
 
 ```bash
-make test     # 122 casos de normalización + idempotencia + catálogo + geometría
+make test     # 125 casos de normalización + idempotencia + catálogo + geometría
 make bench    # latencia del normalizador
 make run      # servidor en :8080
 make catalog  # regenera data/catalog/ubigeos.json desde el Excel del INEI
@@ -21,7 +21,21 @@ make eval     # evalúa el normalizador sobre el dataset de oro (falla si G1 en 
 make db-up    # PostgreSQL + PostGIS local con el esquema v0 (migrations/)
 make snapshot # construye el snapshot del resolver desde OSM (data/snapshot, no versionado)
 make geoeval  # error del resolver en metros sobre la partición test
+make dbload   # carga ubigeos, polígonos, calles, tramos y anclas del snapshot en PostGIS
+make control  # admin con la cola de revisión en http://localhost:8090/admin/
+make snapshot-db  # snapshot + direcciones verificadas de la base (cierra el ciclo)
 ```
+
+### Plano de control (cola de revisión)
+
+1. `make db-up`, `make snapshot` y `make dbload`. La base y el snapshot tienen que ser la misma versión: el admin lo verifica al arrancar.
+2. Crea un token por operador y guarda solo su hash en `data/private/operators.json`:
+   ```bash
+   go run ./cmd/control -hash-token "<token>"
+   # {"<hash>": {"name": "ana", "role": "operador"}}
+   ```
+3. `make control` y abre `http://localhost:8090/admin/`. Desde ahí se sube un CSV (`external_id,address,number,district,...`): las direcciones que quedan en revisión entran a la cola, priorizadas por frecuencia. Cada pin se valida (fuera del distrito o a más de 100 m de la calle elegida pide confirmación) y queda como observación inmutable con su auditoría.
+4. `make snapshot-db` reconstruye el snapshot con las direcciones verificadas: la próxima vez que llegue la misma dirección, el resolver la acepta sola (`resolution_type: VERIFIED`).
 
 ```bash
 curl -s localhost:8080/v1/geocode   -d '{"external_id":"PED-1","address":"Av. Arequipa 2450","district":"Lince"}'
@@ -42,6 +56,9 @@ La ubicación (distrito, provincia, departamento) puede venir en campos separado
 cmd/resolver/            servidor HTTP: /healthz, /v1/normalize y /v1/geocode (si hay snapshot)
 cmd/snapshotbuild/       construye el snapshot en memoria del resolver (calles, anclas, áreas)
 cmd/geoeval/             mide el error del resolver en metros
+cmd/dbload/              carga el plano de control en PostGIS
+cmd/control/             admin: cola de revisión con mapa (MapLibre) y su API
+cmd/gpsimport/           GPS de entrega -> coordenadas de verdad (ADR 0005)
 cmd/catalogbuild/        genera el catálogo desde el Excel de ubigeos del INEI
 cmd/osmfetch/            descarga datos crudos de OpenStreetMap (API Overpass)
 cmd/goldengen/           genera límites distritales y el dataset de oro desde OSM
@@ -55,6 +72,9 @@ internal/geo/            polígonos, punto en polígono y límites distritales
 internal/golden/         formato CSV del dataset de oro
 internal/snapshot/       formato del snapshot del resolver
 internal/resolver/       búsqueda de calle, interpolación de número y decisión por riesgo
+internal/api/            HTTP del plano de datos: batch, API keys, límites, métricas, eventos
+internal/control/        cola de revisión sobre PostGIS y su pantalla
+internal/truth/          validación del GPS de entrega
 migrations/              esquema PostgreSQL + PostGIS del plano de control
 deploy/                  docker compose de la base local
 data/catalog/            ubigeos.json (INEI 2022, 1891 distritos, generado) y ubigeos_seed.json (alias y zonas de Lima/Callao)
@@ -80,6 +100,7 @@ docs/                    plan, guía de arranque y ADRs
 - Hecho: primera muestra real de EMS-D (600 direcciones, en `data/private/`, no versionada). Con los campos de ubicación, el ubigeo coincide con el de EMS-D en el 99.3 %. Hallazgos en `docs/muestra-emsd.md`.
 - Hecho: 200 direcciones reales etiquetadas por un LLM y revisadas por Claude con `docs/convenciones-etiquetado.md` (sin revisión humana completa). Sobre ellas, G1 da **75.6 % en test** (45 filas, sin usar para ajustar) y 96.3 % en dev, con 0 ubigeos equivocados.
 - Hecho (Fase 2, v0): esquema PostGIS, snapshot con 30,870 calles de OSM (las homónimas de un mismo distrito separadas) y 16 mil anclas, resolver en memoria (~33 µs por dirección) y `POST /v1/geocode`. Contra puntos de OSM en test: AUTO_ACCEPT cubre el 8 % con 4.5 % de error (más de 50 m); el 45 % va a revisión. OSM no alcanza como verdad (ADR 0005): la meta de 1-2 % se medirá con GPS de entrega validado.
-- Falta (siguiente): extraer y validar GPS de entrega (ADR 0005), cargar calles y anclas en PostGIS, responder las 16 dudas del etiquetado, una segunda muestra real para medir sin sobreajuste, campos `number` y `reference` en `/v1/normalize`, ingesta de calles al modelo de datos (Fase 2), snapshot en RAM, `/v1/geocode`, admin con mapa.
+- Hecho (plataforma y Fase 3 v0): `/v1/geocode/batch` (1,000 direcciones en ~22 ms), API keys con límite por cliente, `/metrics`, eventos asíncronos sin direcciones, imagen Docker de 15.6 MB, OpenAPI v0; PostGIS con calles de ids estables; admin con cola priorizada, mapa, validaciones del pin, observaciones inmutables y auditoría; las direcciones verificadas vuelven al snapshot y se resuelven solas.
+- Falta (siguiente): correr `scripts/emsd/gps_entregas.sql` en producción y medir con GPS oro (ADR 0005), responder las 16 dudas del etiquetado, una segunda muestra real para medir sin sobreajuste, campos `number` y `reference` en `/v1/normalize`, ingesta de calles al modelo de datos (Fase 2), snapshot en RAM, `/v1/geocode`, admin con mapa.
 - Catálogo: nacional (INEI 2022, 1891 distritos). Falta el distrito 1892, creado después; se agrega en `ubigeos_seed.json` y se corre `make catalog`. Solo `LIMA_METRO` está activa en `data/config/zones.json`.
 - Nombres repetidos en el país (Miraflores, San Miguel, Surco...): si exactamente uno cae en una zona activa se elige ese, con el flag `DISTRICT_BY_ACTIVE_ZONE`. Activar más zonas puede volver ambiguos nombres que hoy se resuelven.

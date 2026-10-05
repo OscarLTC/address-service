@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cola de revisión</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --panel:#fff; --text:#1d2330; --muted:#6b7385; --line:#dde1e7; --accent:#1f6feb; --warn:#b54708; --ok:#1a7f37; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1218; --panel:#171b23; --text:#e6e9ef; --muted:#9aa3b5; --line:#2a303c; --accent:#58a6ff; --warn:#f0a35e; --ok:#3fb950; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--text); height:100vh; display:grid; grid-template-columns: 360px 1fr; }
+  aside { border-right:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; min-height:0; }
+  header { padding:12px 14px; border-bottom:1px solid var(--line); display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  header h1 { font-size:15px; margin:0; }
+  #queue { overflow:auto; flex:1; }
+  .item { padding:10px 14px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .item:hover, .item.sel { background:color-mix(in srgb, var(--accent) 10%, transparent); }
+  .item .addr { font-weight:600; word-break:break-word; }
+  .item .meta { color:var(--muted); font-size:12px; margin-top:2px; }
+  .badge { display:inline-block; padding:0 6px; border-radius:8px; font-size:11px; border:1px solid var(--line); margin-right:4px; }
+  main { display:grid; grid-template-rows: 1fr auto; min-height:0; }
+  #map { min-height:0; }
+  #detail { background:var(--panel); border-top:1px solid var(--line); padding:12px 14px; max-height:42vh; overflow:auto; }
+  #detail h2 { font-size:15px; margin:0 0 6px; word-break:break-word; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0; }
+  .muted { color:var(--muted); }
+  button, input, select { font:inherit; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:var(--panel); color:var(--text); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; }
+  .cand { cursor:pointer; }
+  .cand.sel { outline:2px solid var(--accent); }
+  .warn { color:var(--warn); }
+  .ok { color:var(--ok); }
+  code { font-size:12px; }
+  @media (max-width: 800px) { body { grid-template-columns: 1fr; grid-template-rows: 40vh 60vh; } aside { border-right:0; border-bottom:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<aside>
+  <header>
+    <h1>Cola de revisión</h1>
+    <span id="who" class="muted"></span>
+  </header>
+  <div class="row" style="padding:8px 14px">
+    <select id="status">
+      <option value="open">Abiertos</option>
+      <option value="escalated">Escalados</option>
+      <option value="resolved">Resueltos</option>
+      <option value="unresolvable">Irresolubles</option>
+    </select>
+    <label class="muted">Importar CSV <input id="csv" type="file" accept=".csv,text/csv" style="max-width:150px"></label>
+  </div>
+  <div id="queue"></div>
+</aside>
+<main>
+  <div id="map"></div>
+  <section id="detail"><p class="muted">Elige un ticket de la cola.</p></section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+let token = localStorage.getItem('adminToken') || '';
+let current = null, pin = null, selectedStreet = null, marker = null;
+
+async function api(path, opts = {}) {
+  if (!token) { token = prompt('Token de operador') || ''; localStorage.setItem('adminToken', token); }
+  const res = await fetch(path, { ...opts, headers: { 'X-Admin-Token': token, ...(opts.headers || {}) } });
+  if (res.status === 401) { localStorage.removeItem('adminToken'); token = ''; throw new Error('Token inválido'); }
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
+// Texto que viene de las direcciones: siempre como texto, nunca como HTML.
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e[k] = v; else e.setAttribute(k, v); }
+  for (const c of children) e.append(c instanceof Node ? c : document.createTextNode(c ?? ''));
+  return e;
+}
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: { version: 8, sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256,
+    attribution: '© OpenStreetMap contributors' } }, layers: [{ id: 'osm', type: 'raster', source: 'osm' }] },
+  center: [-77.03, -12.06], zoom: 11,
+});
+map.addControl(new maplibregl.NavigationControl());
+map.on('load', () => {
+  map.addSource('district', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'district', type: 'line', source: 'district', paint: { 'line-color': '#1f6feb', 'line-width': 2, 'line-dasharray': [2, 2] } });
+  map.addSource('streets', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'streets', type: 'line', source: 'streets', paint: { 'line-color': ['case', ['==', ['get', 'street_id'], ['literal', -1]], '#d1242f', '#e16f24'], 'line-width': 5, 'line-opacity': .8 } });
+  map.addSource('suggested', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'suggested', type: 'circle', source: 'suggested', paint: { 'circle-radius': 6, 'circle-color': '#8250df', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+});
+map.on('click', (e) => {
+  if (!current) return;
+  pin = { lat: +e.lngLat.lat.toFixed(6), lng: +e.lngLat.lng.toFixed(6) };
+  if (marker) marker.remove();
+  marker = new maplibregl.Marker({ color: '#1a7f37' }).setLngLat([pin.lng, pin.lat]).addTo(map);
+  renderActions();
+});
+
+async function loadQueue() {
+  const { body } = await api('/admin/api/tickets?status=' + $('#status').value);
+  const q = $('#queue'); q.replaceChildren();
+  if (!Array.isArray(body) || body.length === 0) { q.append(el('p', { class: 'muted', style: 'padding:14px' }, 'No hay tickets.')); return; }
+  for (const t of body) {
+    q.append(el('div', { class: 'item' + (current && current.id === t.id ? ' sel' : ''), onclick: () => open(t.id) },
+      el('div', { class: 'addr' }, t.address),
+      el('div', { class: 'meta' }, el('span', { class: 'badge' }, '×' + t.occurrences), t.district || 'sin distrito', ' · ', t.reason)));
+  }
+}
+
+async function open(id) {
+  const { ok, body } = await api('/admin/api/tickets/' + id);
+  if (!ok) return;
+  current = body; pin = null; selectedStreet = null;
+  if (marker) { marker.remove(); marker = null; }
+  map.getSource('district').setData(body.district_geojson ? { type: 'Feature', geometry: body.district_geojson, properties: {} } : { type: 'FeatureCollection', features: [] });
+  map.getSource('streets').setData(body.streets_geojson || { type: 'FeatureCollection', features: [] });
+  const sug = body.candidates && body.candidates.suggested;
+  map.getSource('suggested').setData(sug ? { type: 'Feature', geometry: { type: 'Point', coordinates: [sug.lng, sug.lat] }, properties: {} } : { type: 'FeatureCollection', features: [] });
+  fit(body);
+  render(); loadQueue();
+}
+
+function fit(t) {
+  const b = new maplibregl.LngLatBounds();
+  const add = (g) => { if (!g) return; const walk = (c) => typeof c[0] === 'number' ? b.extend(c) : c.forEach(walk); walk(g.coordinates); };
+  (t.streets_geojson && t.streets_geojson.features || []).forEach(f => add(f.geometry));
+  if (b.isEmpty()) add(t.district_geojson);
+  if (!b.isEmpty()) map.fitBounds(b, { padding: 60, maxZoom: 17 });
+}
+
+function render() {
+  const t = current, p = t.parse || {}, c = p.components || {}, cand = (t.candidates && t.candidates.candidates) || [];
+  const d = $('#detail'); d.replaceChildren(
+    el('h2', {}, (t.raw_input && t.raw_input.address) || ''),
+    el('div', { class: 'muted' }, 'Normalizada: ', el('code', {}, p.normalized || '—'), ' · ', t.district || 'sin distrito', ' · prioridad ', String(t.priority)),
+    el('div', { class: 'muted' }, 'Motivo: ', (t.candidates && t.candidates.reason) || '', ' · flags: ', ((t.candidates && t.candidates.flags) || []).join(', ')),
+    el('div', { class: 'row' }, 'Vía: ', [c.street_type, c.street_name, c.number].filter(Boolean).join(' ') || '—',
+      c.block || c.lot ? ` · Mz ${c.block || '—'} Lt ${c.lot || '—'}` : '', c.urbanization ? ' · ' + c.urbanization : '', c.reference ? ' · Ref: ' + c.reference : ''),
+    el('div', { class: 'row' }, cand.length ? 'Calles candidatas (elige una):' : 'Sin calles candidatas.'),
+    el('div', { class: 'row' }, ...cand.map(x => el('button', { class: 'cand' + (selectedStreet === x.street_id ? ' sel' : ''), onclick: () => { selectedStreet = x.street_id; highlight(); render(); } },
+      `${x.name} · ${x.match} ${x.score}`))),
+    el('div', { id: 'actions' }));
+  if (t.status !== 'open' && t.status !== 'escalated') d.append(el('p', { class: 'muted' }, 'Estado: ' + t.status));
+  renderActions();
+}
+
+function highlight() {
+  map.setPaintProperty('streets', 'line-color', ['case', ['==', ['get', 'street_id'], selectedStreet ?? -1], '#d1242f', '#e16f24']);
+}
+
+function renderActions(msg) {
+  const a = $('#actions'); if (!a || !current) return;
+  const closed = current.status === 'resolved' || current.status === 'unresolvable';
+  const note = el('input', { placeholder: 'Nota (obligatoria para irresoluble)', style: 'flex:1;min-width:200px' });
+  a.replaceChildren(
+    el('div', { class: 'row' }, pin ? `Pin: ${pin.lat}, ${pin.lng}` : 'Haz clic en el mapa para colocar el pin en la puerta.'),
+    el('div', { class: 'row' },
+      el('button', { class: 'primary', disabled: closed || !pin ? '' : null, onclick: () => send({ action: 'pin', lat: pin.lat, lng: pin.lng, street_id: selectedStreet, note: note.value }) }, 'Guardar pin'),
+      el('button', { disabled: closed ? '' : null, onclick: () => send({ action: 'unresolvable', note: note.value }) }, 'Irresoluble'),
+      el('button', { disabled: closed ? '' : null, onclick: () => send({ action: 'escalate', note: note.value }) }, 'Escalar'),
+      note),
+    msg || '');
+  for (const b of a.querySelectorAll('button')) if (b.getAttribute('disabled') === null) b.removeAttribute('disabled');
+}
+
+async function send(body, confirm = false) {
+  const { ok, status, body: res } = await api(`/admin/api/tickets/${current.id}/resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, confirm }) });
+  if (status === 409 && res.warnings) {
+    if (window.confirm('Alertas:\n' + res.warnings.join('\n') + '\n\n¿Guardar de todos modos?')) return send(body, true);
+    return renderActions(el('div', { class: 'warn' }, 'No se guardó: ' + res.warnings.join(', ')));
+  }
+  if (!ok) return renderActions(el('div', { class: 'warn' }, res.error || 'Error'));
+  renderActions(el('div', { class: 'ok' }, 'Guardado.'));
+  current = null; $('#detail').replaceChildren(el('p', { class: 'muted' }, 'Guardado. Elige el siguiente ticket.'));
+  loadQueue();
+}
+
+$('#status').onchange = loadQueue;
+$('#csv').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const { ok, body } = await api('/admin/api/import', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await f.text() });
+  alert(ok ? 'Importado: ' + JSON.stringify(body) : 'Error: ' + (body.error || ''));
+  e.target.value = ''; loadQueue();
+};
+api('/admin/api/me').then(({ body }) => { $('#who').textContent = body.name ? `${body.name} (${body.role})` : ''; loadQueue(); }).catch(e => alert(e.message));
+</script>
+</body>
+</html>

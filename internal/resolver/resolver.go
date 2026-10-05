@@ -79,11 +79,16 @@ type Resolver struct {
 	snap      *snapshot.Snapshot
 	districts map[string]*districtIndex
 	centroids map[string]geo.Point
+	verified  map[string]*snapshot.Verified
 }
 
 // New indexa el snapshot. centroids da un punto representativo por distrito.
 func New(norm *normalizer.Normalizer, snap *snapshot.Snapshot, centroids map[string]geo.Point) *Resolver {
-	r := &Resolver{norm: norm, snap: snap, districts: map[string]*districtIndex{}, centroids: centroids}
+	r := &Resolver{norm: norm, snap: snap, districts: map[string]*districtIndex{}, centroids: centroids, verified: map[string]*snapshot.Verified{}}
+	for i := range snap.Verified {
+		v := &snap.Verified[i]
+		r.verified[v.KeyHash] = v
+	}
 	idx := func(u string) *districtIndex {
 		d := r.districts[u]
 		if d == nil {
@@ -131,6 +136,15 @@ func (r *Resolver) Geocode(req normalizer.Request) Result {
 		return res
 	}
 	d := r.districts[n.Location.Ubigeo]
+
+	// Dirección ya verificada por un operador o por GPS de entrega: es la respuesta.
+	if v := r.verified[snapshot.AddressKeyHash(n.MatchKey, n.Location.Ubigeo)]; v != nil && n.MatchKey != "" {
+		res.Location, res.PrecisionLevel, res.ResolutionType = toPoint(v.Point), AddressPoint, "VERIFIED"
+		res.Score, res.Decision, res.Status = 1, AutoAccept, "RESOLVED"
+		res.Canonical = n.Normalized
+		res.Flags = append(res.Flags, "VERIFIED_"+strings.ToUpper(v.Method))
+		return res
+	}
 
 	if c.StreetName != "" && d != nil {
 		cands := r.candidates(d, c.StreetType, c.StreetName)

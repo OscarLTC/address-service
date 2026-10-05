@@ -126,3 +126,21 @@ func BenchmarkGeocodeRealSnapshot(b *testing.B) {
 		_ = r.Geocode(reqs[i%len(reqs)])
 	}
 }
+
+// Una dirección verificada (pin de operador) se responde con su punto, sin buscar.
+func TestVerifiedAddressWins(t *testing.T) {
+	root := filepath.Join("..", "..", "data")
+	cat, _ := catalog.Load(filepath.Join(root, "catalog", "ubigeos.json"))
+	lex, _ := normalizer.LoadLexicon(filepath.Join(root, "rules", "lexicon.json"))
+	norm := normalizer.New(cat, lex, normalizer.Options{ActiveZones: map[string]bool{"LIMA_METRO": true}})
+	n := norm.Normalize(normalizer.Request{Address: "Mz C Lt 14 Urb. Los Jardines Inventados", District: "Comas"})
+	snap := &snapshot.Snapshot{Format: snapshot.FormatVersion, Version: "test", Verified: []snapshot.Verified{{
+		KeyHash: snapshot.AddressKeyHash(n.MatchKey, n.Location.Ubigeo), Ubigeo: n.Location.Ubigeo,
+		Point: geo.Point{-77.05, -11.94}, Method: "pin_operador",
+	}}}
+	r := resolver.New(norm, snap, nil)
+	got := r.Geocode(normalizer.Request{Address: "MZ. C LT. 14 URB LOS JARDINES INVENTADOS", District: "Comas"})
+	if got.ResolutionType != "VERIFIED" || got.Decision != resolver.AutoAccept || got.Location == nil || got.Location.Lng != -77.05 {
+		t.Errorf("se esperaba la dirección verificada: %+v", got)
+	}
+}
