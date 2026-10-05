@@ -28,6 +28,51 @@ import (
 	"addrsvc/internal/snapshot"
 )
 
+// watchSnapshot recarga el snapshot cuando cambia el archivo (o con SIGHUP) y lo
+// intercambia de forma atómica. Si la carga falla, sigue el snapshot anterior: para
+// volver a una versión previa basta con restaurar el archivo anterior.
+func watchSnapshot(path string, every time.Duration, load func() (*resolver.Resolver, error), server *api.Server, logger *slog.Logger) {
+	modTime := func() time.Time {
+		if fi, err := os.Stat(path); err == nil {
+			return fi.ModTime()
+		}
+		return time.Time{}
+	}
+	last := modTime()
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	var tick <-chan time.Time
+	if every > 0 {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		tick = t.C
+	}
+	for {
+		forced := false
+		select {
+		case <-tick:
+		case <-hup:
+			forced = true
+		}
+		mt := modTime()
+		if !forced && (mt.IsZero() || mt.Equal(last)) {
+			continue
+		}
+		res, err := load()
+		if err != nil {
+			logger.Error("recarga del snapshot fallida: se mantiene la versión anterior", "error", err)
+			continue
+		}
+		last = mt
+		prev := ""
+		if old := server.Resolver(); old != nil {
+			prev = old.Version()
+		}
+		server.SetResolver(res)
+		logger.Info("snapshot recargado", "anterior", prev, "nuevo", res.Version())
+	}
+}
+
 func main() {
 	addr := flag.String("addr", ":8080", "dirección de escucha")
 	dataDir := flag.String("data", "data", "directorio de datos (catálogo, reglas, zonas, geo)")
@@ -37,6 +82,7 @@ func main() {
 	maxBatch := flag.Int("max-batch", 5000, "máximo de direcciones por lote")
 	eventsPath := flag.String("events", "", "archivo NDJSON de eventos de resolución (vacío = no se registran)")
 	hashKey := flag.String("hash-key", "", "imprime el hash de una API key y termina")
+	reloadEvery := flag.Duration("reload-every", 30*time.Second, "cada cuánto revisar si cambió el snapshot (0 = solo con SIGHUP)")
 	flag.Parse()
 
 	if *hashKey != "" {
@@ -68,15 +114,23 @@ func main() {
 	})
 
 	cfg := api.Config{Normalizer: norm, RatePerSecond: *rate, MaxBatch: *maxBatch, Logger: logger}
-	if snap, err := snapshot.Load(*snapPath); err != nil {
+	districts, err := geo.LoadDistricts(filepath.Join(*dataDir, "geo", "districts.json"))
+	if err != nil {
+		fatal("límites", err)
+	}
+	centroids := districts.Centroids()
+	load := func() (*resolver.Resolver, error) {
+		snap, err := snapshot.Load(*snapPath)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("snapshot cargado", "version", snap.Version, "calles", len(snap.Streets), "verificadas", len(snap.Verified))
+		return resolver.New(norm, snap, centroids), nil
+	}
+	if res, err := load(); err != nil {
 		logger.Warn("sin snapshot: /v1/geocode responde 503", "error", err)
 	} else {
-		districts, err := geo.LoadDistricts(filepath.Join(*dataDir, "geo", "districts.json"))
-		if err != nil {
-			fatal("límites", err)
-		}
-		cfg.Resolver = resolver.New(norm, snap, districts.Centroids())
-		logger.Info("snapshot cargado", "version", snap.Version, "calles", len(snap.Streets))
+		cfg.Resolver = res
 	}
 	if *keysPath != "" {
 		data, err := os.ReadFile(*keysPath)
@@ -97,9 +151,11 @@ func main() {
 		}
 	}
 
+	server := api.New(cfg)
+	go watchSnapshot(*snapPath, *reloadEvery, load, server, logger)
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.New(cfg).Handler(),
+		Handler:           server.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

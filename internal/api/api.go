@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"addrsvc/internal/normalizer"
@@ -66,7 +67,16 @@ type Server struct {
 	metrics *Metrics
 	limiter *limiter
 	idem    *idemCache
+	// res es el resolver vigente; se reemplaza de forma atómica al recargar el
+	// snapshot, sin cortar las solicitudes en curso.
+	res atomic.Pointer[resolver.Resolver]
 }
+
+// SetResolver reemplaza el resolver vigente (recarga del snapshot en caliente).
+func (s *Server) SetResolver(r *resolver.Resolver) { s.res.Store(r) }
+
+// Resolver devuelve el resolver vigente (nil si no hay snapshot).
+func (s *Server) Resolver() *resolver.Resolver { return s.res.Load() }
 
 // New crea el servidor.
 func New(cfg Config) *Server {
@@ -76,7 +86,11 @@ func New(cfg Config) *Server {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Server{cfg: cfg, metrics: NewMetrics(), limiter: newLimiter(cfg.RatePerSecond), idem: newIdemCache(256)}
+	s := &Server{cfg: cfg, metrics: NewMetrics(), limiter: newLimiter(cfg.RatePerSecond), idem: newIdemCache(256)}
+	if cfg.Resolver != nil {
+		s.res.Store(cfg.Resolver)
+	}
+	return s
 }
 
 // Handler devuelve el mux con todas las rutas.
@@ -86,11 +100,12 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": s.cfg.Normalizer.VersionString()})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if s.cfg.Resolver == nil {
+		res := s.Resolver()
+		if res == nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "sin snapshot"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "dataset_version": s.cfg.Resolver.Version()})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "dataset_version": res.Version()})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics.ServeHTTP)
 	mux.Handle("POST /v1/normalize", s.protect("normalize", http.HandlerFunc(s.normalize)))
@@ -153,7 +168,8 @@ func (s *Server) normalize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) geocode(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Resolver == nil {
+	res := s.Resolver()
+	if res == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sin snapshot cargado"})
 		return
 	}
@@ -163,28 +179,30 @@ func (s *Server) geocode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "JSON inválido"})
 		return
 	}
-	resp := s.resolve(it, clientOf(r))
+	resp := s.resolve(res, it, clientOf(r))
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) resolve(it Item, client string) GeocodeResponse {
+func (s *Server) resolve(rv *resolver.Resolver, it Item, client string) GeocodeResponse {
 	start := time.Now()
-	res := s.cfg.Resolver.Geocode(it.Request)
+	res := rv.Geocode(it.Request)
 	us := time.Since(start).Microseconds()
 	s.metrics.decision(res.Decision, res.PrecisionLevel)
 	s.cfg.Events.Push(Event{
 		Time: start.UTC(), Client: client, ExternalID: it.ExternalID, Decision: res.Decision,
 		ResolutionType: res.ResolutionType, PrecisionLevel: res.PrecisionLevel, Score: res.Score,
-		ProcessingUS: us, DatasetVersion: s.cfg.Resolver.Version(), NormalizerVersion: res.Normalized.Version,
+		ProcessingUS: us, DatasetVersion: rv.Version(), NormalizerVersion: res.Normalized.Version,
 	})
-	return GeocodeResponse{ExternalID: it.ExternalID, Result: res, DatasetVersion: s.cfg.Resolver.Version(), ProcessingUS: us}
+	return GeocodeResponse{ExternalID: it.ExternalID, Result: res, DatasetVersion: rv.Version(), ProcessingUS: us}
 }
 
 // batch resuelve un lote y responde NDJSON en el orden de entrada. Las direcciones
 // repetidas se resuelven una vez. Con Idempotency-Key, repetir la misma solicitud
 // devuelve la misma respuesta sin recalcular.
 func (s *Server) batch(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Resolver == nil {
+	// Todo el lote se resuelve con la misma versión del snapshot.
+	rv := s.Resolver()
+	if rv == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sin snapshot cargado"})
 		return
 	}
@@ -235,7 +253,7 @@ func (s *Server) batch(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			defer wg.Done()
 			for j := range next {
-				results[j] = s.resolve(uniq[j], client)
+				results[j] = s.resolve(rv, uniq[j], client)
 			}
 		}()
 	}

@@ -82,8 +82,18 @@ func (s *Snapshot) SortAnchors() {
 	}
 }
 
-// Save escribe el snapshot comprimido.
+// Save escribe el snapshot comprimido de forma atómica (archivo temporal y
+// renombrado): un resolver que lo está vigilando nunca lee un archivo a medias.
 func Save(path string, s *Snapshot) error {
+	tmp := path + ".tmp"
+	if err := save(tmp, s); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func save(path string, s *Snapshot) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
