@@ -164,6 +164,27 @@ func (s *Store) GetTicket(ctx context.Context, id int64) (*TicketDetail, error) 
 	return &t, err
 }
 
+// ResolvedTickets devuelve los tickets cerrados con su decisión, para exportar.
+func (s *Store) ResolvedTickets(ctx context.Context) ([][]string, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT t.id::text, coalesce(t.raw_input->>'external_id',''), coalesce(t.raw_input->>'address',''),
+		       coalesce(t.raw_input->>'district',''), t.status,
+		       coalesce(t.resolution->>'lat',''), coalesce(t.resolution->>'lng',''), coalesce(t.resolution->>'street_id',''),
+		       coalesce(t.assigned_to,''), coalesce(to_char(t.resolved_at, 'YYYY-MM-DD"T"HH24:MI:SS'),''), coalesce(t.resolution->>'note','')
+		FROM review_tickets t WHERE t.status IN ('resolved','unresolvable') ORDER BY t.resolved_at`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) ([]string, error) {
+		v := make([]string, 11)
+		ptrs := make([]any, 11)
+		for i := range v {
+			ptrs[i] = &v[i]
+		}
+		return v, r.Scan(ptrs...)
+	})
+}
+
 // Resolution es lo que decide un operador sobre un ticket.
 type Resolution struct {
 	Action   string   `json:"action"` // pin | unresolvable | escalate

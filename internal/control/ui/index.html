@@ -51,6 +51,7 @@
       <option value="unresolvable">Irresolubles</option>
     </select>
     <label class="muted">Importar CSV <input id="csv" type="file" accept=".csv,text/csv" style="max-width:150px"></label>
+    <button id="export" title="Tickets resueltos con su coordenada verificada">Descargar verificadas</button>
   </div>
   <div id="queue"></div>
 </aside>
@@ -183,12 +184,20 @@ async function send(body, confirm = false) {
 }
 
 $('#status').onchange = loadQueue;
+async function download(path, opts, name) {
+  const res = await fetch(path, { ...opts, headers: { 'X-Admin-Token': token, ...((opts && opts.headers) || {}) } });
+  if (!res.ok) { alert('Error ' + res.status); return; }
+  const a = el('a', { href: URL.createObjectURL(await res.blob()), download: name });
+  document.body.append(a); a.click(); a.remove();
+}
+// Al importar se descarga el archivo con el resultado de cada fila; lo que quedó en
+// revisión entra a la cola.
 $('#csv').onchange = async (e) => {
   const f = e.target.files[0]; if (!f) return;
-  const { ok, body } = await api('/admin/api/import', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await f.text() });
-  alert(ok ? 'Importado: ' + JSON.stringify(body) : 'Error: ' + (body.error || ''));
+  await download('/admin/api/import?format=csv', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await f.text() }, 'resultado.csv');
   e.target.value = ''; loadQueue();
 };
+$('#export').onclick = () => download('/admin/api/export/verified.csv', {}, 'verificadas.csv');
 api('/admin/api/me').then(({ body }) => { $('#who').textContent = body.name ? `${body.name} (${body.role})` : ''; loadQueue(); }).catch(e => alert(e.message));
 </script>
 </body>

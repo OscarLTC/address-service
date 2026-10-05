@@ -142,6 +142,30 @@ func TestReviewFlow(t *testing.T) {
 	if code, _, _ := call("POST", path+"/resolve", `{"action":"escalate"}`); code != http.StatusConflict {
 		t.Errorf("un ticket resuelto no se puede volver a resolver: %d", code)
 	}
+
+	// Exportaciones: resultado por fila del CSV importado y tickets verificados.
+	csvReq, _ := http.NewRequest("POST", srv.URL+"/admin/api/import?format=csv", strings.NewReader("external_id,address,district\nX,Calle Los Naranjos Inventados,Lince\n"))
+	csvReq.Header.Set("X-Admin-Token", "tok")
+	csvResp, err := http.DefaultClient.Do(csvReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(csvResp.Body)
+	csvResp.Body.Close()
+	if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(lines) != 2 || !strings.Contains(lines[1], "REVIEW_REQUIRED") {
+		t.Errorf("resultado CSV inesperado: %q", out)
+	}
+	expReq, _ := http.NewRequest("GET", srv.URL+"/admin/api/export/verified.csv", nil)
+	expReq.Header.Set("X-Admin-Token", "tok")
+	expResp, err := http.DefaultClient.Do(expReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, _ := io.ReadAll(expResp.Body)
+	expResp.Body.Close()
+	if !strings.Contains(string(exp), "Naranjos Inventados") || !strings.Contains(string(exp), tag) {
+		t.Errorf("la exportación de verificadas no incluye el ticket resuelto: %q", exp)
+	}
 }
 
 func jsonNum(f float64) string { b, _ := json.Marshal(int64(f)); return string(b) }

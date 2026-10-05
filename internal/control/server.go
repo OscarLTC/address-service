@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	})))
 	mux.Handle("POST /admin/api/import", s.auth(http.HandlerFunc(s.importCSV)))
 	mux.Handle("GET /admin/api/tickets", s.auth(http.HandlerFunc(s.listTickets)))
+	mux.Handle("GET /admin/api/export/verified.csv", s.auth(http.HandlerFunc(s.exportVerified)))
 	mux.Handle("GET /admin/api/tickets/{id}", s.auth(http.HandlerFunc(s.getTicket)))
 	mux.Handle("POST /admin/api/tickets/{id}/resolve", s.auth(http.HandlerFunc(s.resolve)))
 	return mux
@@ -112,6 +113,16 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	op := operatorOf(r)
 	stats := map[string]int{}
+	// Con ?format=csv se devuelve cada fila con su resultado: reemplaza el proceso
+	// manual de completar coordenadas en un archivo.
+	var out *csv.Writer
+	if r.URL.Query().Get("format") == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="resultado.csv"`)
+		out = csv.NewWriter(w)
+		_ = out.Write([]string{"external_id", "address", "district", "status", "decision", "precision_level",
+			"lat", "lng", "ubigeo", "canonical_address", "ticket_id", "flags"})
+	}
 	for {
 		rec, err := cr.Read()
 		if err == io.EOF {
@@ -131,13 +142,14 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		res := s.resolver.Geocode(req)
 		stats[res.Decision]++
 		if res.Decision != resolver.Review {
+			writeRow(out, pick(rec, "external_id"), req, res, 0)
 			continue
 		}
 		key := res.Normalized.MatchKey + "|" + res.Ubigeo
 		if res.Ubigeo == "" {
 			key += strings.ToUpper(req.District)
 		}
-		_, created, err := s.store.UpsertTicket(r.Context(), NewTicket{
+		ticketID, created, err := s.store.UpsertTicket(r.Context(), NewTicket{
 			AddressKey: key, Ubigeo: res.Ubigeo,
 			Raw:        map[string]any{"external_id": pick(rec, "external_id"), "address": req.Address, "number": req.Number, "reference": req.Reference, "district": req.District, "province": req.Province, "ubigeo": req.Ubigeo},
 			Parse:      res.Normalized,
@@ -154,9 +166,50 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		} else {
 			stats["tickets_repetidos"]++
 		}
+		writeRow(out, pick(rec, "external_id"), req, res, ticketID)
 	}
 	s.logger.Info("importación", "operador", op.Name, "total", stats["total"], "revision", stats[resolver.Review])
+	if out != nil {
+		out.Flush()
+		return
+	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func writeRow(out *csv.Writer, externalID string, req normalizer.Request, res resolver.Result, ticket int64) {
+	if out == nil {
+		return
+	}
+	lat, lng := "", ""
+	// Solo se entrega coordenada de lo resuelto: lo que va a revisión no lleva una
+	// coordenada dudosa.
+	if res.Location != nil && res.Status == "RESOLVED" {
+		lat, lng = strconv.FormatFloat(res.Location.Lat, 'f', 6, 64), strconv.FormatFloat(res.Location.Lng, 'f', 6, 64)
+	}
+	t := ""
+	if ticket > 0 {
+		t = strconv.FormatInt(ticket, 10)
+	}
+	_ = out.Write([]string{externalID, req.Address, req.District, res.Status, res.Decision, res.PrecisionLevel,
+		lat, lng, res.Ubigeo, res.Canonical, t, strings.Join(res.Flags, " ")})
+}
+
+// exportVerified descarga los tickets resueltos con su coordenada verificada.
+func (s *Server) exportVerified(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.store.ResolvedTickets(r.Context())
+	if err != nil {
+		s.logger.Error("exportación", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo exportar"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="verificadas.csv"`)
+	out := csv.NewWriter(w)
+	_ = out.Write([]string{"ticket_id", "external_id", "address", "district", "status", "lat", "lng", "street_id", "resolved_by", "resolved_at", "note"})
+	for _, row := range rows {
+		_ = out.Write(row)
+	}
+	out.Flush()
 }
 
 func reasonOf(r resolver.Result) string {
