@@ -73,6 +73,7 @@ func main() {
 	dataDir := flag.String("data", "data", "directorio de datos")
 	split := flag.String("split", "test", "partición a medir (test, dev o all)")
 	examples := flag.Int("examples", 15, "peores casos a mostrar (solo con -split dev)")
+	quality := flag.String("quality", "", "si se indica (oro o plata), usa solo filas de GPS de entrega de esa calidad o mejor")
 	flag.Parse()
 
 	cat, err := catalog.Load(filepath.Join(*dataDir, "catalog", "ubigeos.json"))
@@ -125,6 +126,10 @@ func main() {
 	}
 	for _, row := range rows {
 		if (*split != "all" && row.Split != *split) || row.Lat == "" {
+			continue
+		}
+		if *quality == "oro" && row.VerificationMethod != "gps_entrega_oro" ||
+			*quality == "plata" && !strings.HasPrefix(row.VerificationMethod, "gps_entrega_") {
 			continue
 		}
 		lat, err1 := strconv.ParseFloat(row.Lat, 64)
