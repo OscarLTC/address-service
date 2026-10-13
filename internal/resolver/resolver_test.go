@@ -43,6 +43,8 @@ func newResolver(t *testing.T) *resolver.Resolver {
 			a(200, -77.0450, -12.0850), a(220, -77.0448, -12.0850)),
 		street(4, "150116", "CALLE", "LOS NARANJOS", [][]geo.Point{{{-77.0350, -12.0750}, {-77.0345, -12.0750}}},
 			a(800, -77.0350, -12.0750), a(820, -77.0348, -12.0750)),
+	}, Areas: []snapshot.Area{
+		{Ubigeo: "150116", Name: "Los Jardines Inventados", Key: txt.Key("Los Jardines Inventados"), Point: geo.Point{-77.0348, -12.0752}},
 	}}
 	snap.SortAnchors()
 	return resolver.New(norm, snap, map[string]geo.Point{"150116": {-77.036, -12.083}})
@@ -60,7 +62,10 @@ func TestGeocode(t *testing.T) {
 		{"calle_larga_sin_anclas_va_a_revision", "Av. Los Cerezos 500", "Lince", resolver.Review, resolver.Street, "LONG_STREET_WITHOUT_ANCHOR", 2},
 		{"homonimas_desempatadas_por_numero", "Calle Los Naranjos 810", "Lince", resolver.AutoAccept, resolver.SegmentInterpolated, "STREET_BY_NUMBER_COVERAGE", 4},
 		{"homonimas_sin_numero_van_a_revision", "Calle Los Naranjos", "Lince", resolver.Review, resolver.Street, "AMBIGUOUS_STREET", 0},
+		{"homonimas_desempatadas_por_urbanizacion", "Calle Los Naranjos, Urb. Los Jardines Inventados", "Lince", resolver.AcceptFlagged, resolver.Street, "STREET_BY_AREA", 4},
+		{"numero_lejos_de_las_anclas_se_extrapola", "Av. Las Palmeras 190", "Lince", resolver.Review, resolver.Street, "EXTRAPOLATED_FROM_ANCHORS", 1},
 		{"grafia_distinta_no_es_auto_accept", "Av. Las Palmeraz 120", "Lince", resolver.AcceptFlagged, resolver.AddressPoint, "", 1},
+		{"nombre_comun_dentro_del_oficial", "Av. Palmeras 120", "Lince", resolver.AcceptFlagged, resolver.AddressPoint, "", 1},
 		{"calle_inexistente_va_al_centroide", "Jr. Inventado 10", "Lince", resolver.Review, resolver.District, "STREET_NOT_FOUND", 0},
 	}
 	for _, c := range cases {
@@ -90,6 +95,14 @@ func TestInterpolationIsBetweenAnchors(t *testing.T) {
 	got := newResolver(t).Geocode(normalizer.Request{Address: "Av. Las Palmeras 130", District: "Lince"})
 	if got.Location == nil || got.Location.Lng <= -77.0398 || got.Location.Lng >= -77.0396 {
 		t.Errorf("el 130 debe quedar entre el 120 y el 140: %+v", got.Location)
+	}
+}
+
+// La extrapolación avanza desde la última ancla en el sentido de la numeración.
+func TestExtrapolationFollowsNumbering(t *testing.T) {
+	got := newResolver(t).Geocode(normalizer.Request{Address: "Av. Las Palmeras 190", District: "Lince"})
+	if got.Location == nil || got.Location.Lng <= -77.0396 || got.Location.Lng > -77.0390 {
+		t.Errorf("el 190 debe quedar después del 140, dentro de la calle: %+v", got.Location)
 	}
 }
 
@@ -142,6 +155,48 @@ func TestVerifiedAddressWins(t *testing.T) {
 	got := r.Geocode(normalizer.Request{Address: "MZ. C LT. 14 URB LOS JARDINES INVENTADOS", District: "Comas"})
 	if got.ResolutionType != "VERIFIED" || got.Decision != resolver.AutoAccept || got.Location == nil || got.Location.Lng != -77.05 {
 		t.Errorf("se esperaba la dirección verificada: %+v", got)
+	}
+}
+
+// Con los cruces de la calle, un número lejos de las anclas se ubica en su cuadra:
+// las anclas fijan las cuadras 1 y 2, y el 450 cae en la cuarta.
+func TestBlockRange(t *testing.T) {
+	root := filepath.Join("..", "..", "data")
+	cat, _ := catalog.Load(filepath.Join(root, "catalog", "ubigeos.json"))
+	lex, _ := normalizer.LoadLexicon(filepath.Join(root, "rules", "lexicon.json"))
+	norm := normalizer.New(cat, lex, normalizer.Options{ActiveZones: map[string]bool{"LIMA_METRO": true}})
+	s := street(1, "150116", "AVENIDA", "LAS PALMERAS", [][]geo.Point{{{-77.0400, -12.0800}, {-77.0340, -12.0800}}},
+		a(110, -77.0399, -12.0800), a(150, -77.0395, -12.0800), a(230, -77.0387, -12.0800))
+	for _, lng := range []float64{-77.0390, -77.0380, -77.0370, -77.0360, -77.0350} {
+		s.Crossings = append(s.Crossings, geo.Point{lng, -12.0800})
+	}
+	r := resolver.New(norm, &snapshot.Snapshot{Format: snapshot.FormatVersion, Version: "test", Streets: []snapshot.Street{s}}, nil)
+	got := r.Geocode(normalizer.Request{Address: "Av. Las Palmeras 450", District: "Lince"})
+	if !contains(got.Flags, "BLOCK_RANGE") || got.PrecisionLevel != resolver.SegmentInterpolated || got.Decision != resolver.AcceptFlagged {
+		t.Fatalf("se esperaba la ubicación por cuadra: %s %s %v", got.PrecisionLevel, got.Decision, got.Flags)
+	}
+	if got.Location.Lng <= -77.0370 || got.Location.Lng >= -77.0360 {
+		t.Errorf("el 450 debe quedar en la cuarta cuadra: %+v", got.Location)
+	}
+}
+
+// Un pin de operador posterior al snapshot mejora la sugerencia de sus vecinos: con
+// el 200 fijado, el 190 queda entre el 140 y el 200.
+func TestSuggestUsesNewPins(t *testing.T) {
+	r := newResolver(t)
+	before, ok := r.Suggest(1, "190", nil, nil)
+	if !ok || before.Precision != resolver.Street {
+		t.Fatalf("sin pines se esperaba una ubicación a nivel de calle: %+v", before)
+	}
+	got, ok := r.Suggest(1, "190", []snapshot.Anchor{a(200, -77.0392, -12.0800)}, nil)
+	if !ok || got.Precision != resolver.SegmentInterpolated || got.Pins != 1 {
+		t.Fatalf("con el pin se esperaba una interpolación: %+v", got)
+	}
+	if got.Location.Lng <= -77.0396 || got.Location.Lng >= -77.0392 {
+		t.Errorf("el 190 debe quedar entre el 140 y el pin del 200: %+v", got.Location)
+	}
+	if _, ok := r.Suggest(999, "190", nil, nil); ok {
+		t.Error("una calle que no está en el snapshot no tiene sugerencia")
 	}
 }
 

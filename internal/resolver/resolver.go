@@ -81,6 +81,8 @@ type Resolver struct {
 	districts map[string]*districtIndex
 	centroids map[string]geo.Point
 	verified  map[string]*snapshot.Verified
+	hints     map[*snapshot.Street][]snapshot.Anchor
+	byID      map[int]*snapshot.Street
 }
 
 // New indexa el snapshot. centroids da un punto representativo por distrito.
@@ -99,8 +101,10 @@ func New(norm *normalizer.Normalizer, snap *snapshot.Snapshot, centroids map[str
 		}
 		return d
 	}
+	r.byID = make(map[int]*snapshot.Street, len(snap.Streets))
 	for i := range snap.Streets {
 		s := &snap.Streets[i]
+		r.byID[s.ID] = s
 		d := idx(s.Ubigeo)
 		d.byKey[s.Key] = append(d.byKey[s.Key], s)
 		for _, a := range s.Aliases {
@@ -117,6 +121,7 @@ func New(norm *normalizer.Normalizer, snap *snapshot.Snapshot, centroids map[str
 		a := &snap.Areas[i]
 		idx(a.Ubigeo).areas[a.Key] = a
 	}
+	r.hints = ParallelHints(snap.Streets)
 	return r
 }
 
@@ -153,7 +158,12 @@ func (r *Resolver) Geocode(req normalizer.Request) Result {
 	if c.StreetName != "" && d != nil {
 		cands := r.candidates(d, c.StreetType, c.StreetName)
 		if len(cands) > 0 {
-			best, loc, ambiguous, how := pick(cands, c.Number)
+			// La urbanización de la dirección, si está en el índice, ubica la calle.
+			var near *geo.Point
+			if a := d.areas[areaKey(c.Urbanization)]; a != nil && c.Urbanization != "" {
+				near = &a.Point
+			}
+			best, loc, ambiguous, how := pick(cands, c.Number, near, r.hints)
 			res.StreetID, res.Score, res.ResolutionType = best.street.ID, best.score, best.match
 			res.Canonical = strings.TrimSpace(best.street.Type + " " + best.street.Name)
 			for i, cd := range cands {
@@ -173,6 +183,8 @@ func (r *Resolver) Geocode(req normalizer.Request) Result {
 				res.Flags = append(res.Flags, "AMBIGUOUS_STREET")
 			}
 			switch {
+			case loc.note != "":
+				res.Flags = append(res.Flags, loc.note)
 			case !loc.tight && (loc.precision == AddressPoint || loc.precision == SegmentInterpolated):
 				res.Flags = append(res.Flags, "WIDE_INTERPOLATION")
 			case !loc.tight && loc.precision == Street:
@@ -234,13 +246,19 @@ func (r *Resolver) candidates(d *districtIndex, typ, name string) []candidate {
 		add(s, 0.93, "PHONETIC")
 	}
 	if len(best) == 0 {
+		words := strings.Fields(key)
 		seen := map[*snapshot.Street]bool{}
-		for _, t := range strings.Fields(key) {
+		for _, t := range words {
 			for _, s := range d.byToken[t] {
 				if seen[s] {
 					continue
 				}
 				seen[s] = true
+				// El nombre de uso común es parte del oficial ("Larco" por "José
+				// Larco") o al revés.
+				if own := strings.Fields(s.Key); subset(words, own) || subset(own, words) {
+					add(s, partialScore, "PARTIAL")
+				}
 				if sim := similarity(key, s.Key); sim >= 0.82 {
 					add(s, 0.9*sim, "FUZZY")
 				}
@@ -260,6 +278,24 @@ func (r *Resolver) candidates(d *districtIndex, typ, name string) []candidate {
 	return out
 }
 
+// partialScore es el puntaje de una calle cuyo nombre contiene al buscado o está
+// contenido en él: alcanza para aceptar con marca, nunca para AUTO_ACCEPT.
+const partialScore = 0.88
+
+// subset indica si todas las palabras de a están en b.
+func subset(a, b []string) bool {
+	for _, x := range a {
+		found := false
+		for _, y := range b {
+			found = found || x == y
+		}
+		if !found {
+			return false
+		}
+	}
+	return len(a) > 0
+}
+
 // location es la ubicación de un número sobre una calle.
 type location struct {
 	point     geo.Point
@@ -268,6 +304,8 @@ type location struct {
 	// ancla exacta sin duplicados lejanos, o una interpolación entre anclas cercanas
 	// del mismo lado.
 	tight bool
+	// note es el flag que explica una ubicación estimada sin interpolar.
+	note string
 }
 
 // maxTightGap es la mayor distancia en números entre las anclas de una interpolación
@@ -275,8 +313,9 @@ type location struct {
 const maxTightGap = 40
 
 // pick elige la calle entre los mejores candidatos. Si los mejores son componentes
-// homónimas del mismo distrito, desempata la única que tiene anclas para el número.
-func pick(cands []candidate, number string) (candidate, location, bool, string) {
+// homónimas del mismo distrito, desempata la única que tiene anclas para el número
+// o, si no, la que queda claramente más cerca de la urbanización (near).
+func pick(cands []candidate, number string, near *geo.Point, hints map[*snapshot.Street][]snapshot.Anchor) (candidate, location, bool, string) {
 	best := cands[0]
 	var top []candidate
 	for _, c := range cands {
@@ -284,7 +323,7 @@ func pick(cands []candidate, number string) (candidate, location, bool, string) 
 			top = append(top, c)
 		}
 	}
-	loc := locateOnStreet(best.street, number)
+	loc := locateOnStreet(best.street, number, near, hints[best.street])
 	if len(top) == 1 {
 		return best, loc, false, ""
 	}
@@ -298,7 +337,7 @@ func pick(cands []candidate, number string) (candidate, location, bool, string) 
 	var covered []int
 	locs := make([]location, len(top))
 	for i, c := range top {
-		locs[i] = locateOnStreet(c.street, number)
+		locs[i] = locateOnStreet(c.street, number, near, hints[c.street])
 		if locs[i].precision == AddressPoint || locs[i].precision == SegmentInterpolated {
 			covered = append(covered, i)
 		}
@@ -306,24 +345,291 @@ func pick(cands []candidate, number string) (candidate, location, bool, string) 
 	if len(covered) == 1 {
 		return top[covered[0]], locs[covered[0]], false, "STREET_BY_NUMBER_COVERAGE"
 	}
+	if near != nil {
+		closest, d1, d2 := 0, math.Inf(1), math.Inf(1)
+		for i, c := range top {
+			switch _, d := closestOnStreet(c.street, *near); {
+			case d < d1:
+				closest, d1, d2 = i, d, d1
+			case d < d2:
+				d2 = d
+			}
+		}
+		if d1 <= maxAreaDistance && d2 >= 2*d1+areaMargin {
+			return top[closest], locs[closest], false, "STREET_BY_AREA"
+		}
+	}
 	return best, loc, true, ""
 }
 
+// maxAreaDistance es la mayor distancia entre una calle y el centro de la
+// urbanización para creer que la calle pasa por ella. areaMargin es la ventaja
+// mínima sobre la siguiente homónima para desempatar.
+const (
+	maxAreaDistance = 800.0
+	areaMargin      = 200.0
+)
+
 // locateOnStreet ubica el número sobre la calle: ancla exacta, interpolación entre
 // las dos anclas más cercanas (prefiriendo la misma paridad, que en Lima es el mismo
-// lado) o, sin anclas útiles, un punto sobre la calle.
-func locateOnStreet(s *snapshot.Street, number string) location {
+// lado), modelo de cuadras, extrapolación desde las anclas o, sin anclas útiles, un punto sobre la
+// calle: el más cercano a la urbanización (near) si se conoce, o el central.
+func locateOnStreet(s *snapshot.Street, number string, near *geo.Point, hints []snapshot.Anchor) location {
 	num, err := strconv.Atoi(strings.TrimRightFunc(number, func(r rune) bool { return r < '0' || r > '9' }))
 	if err == nil && len(s.Anchors) > 0 {
 		if l, ok := interpolate(s.Anchors, num, true); ok {
 			return l
+		}
+		// Sin anclas del mismo lado que encierren el número, la cuadra lo ubica mejor
+		// que las anclas del otro lado o que extrapolar.
+		if p, ok := locateByBlocks(s, num); ok {
+			return location{point: p, precision: SegmentInterpolated, note: "BLOCK_RANGE"}
 		}
 		if l, ok := interpolate(s.Anchors, num, false); ok {
 			l.tight = false // del otro lado de la calle
 			return l
 		}
 	}
+	// Sin anclas propias que sirvan, la numeración de las calles paralelas.
+	if err == nil && len(hints) > 0 {
+		borrowed := *s
+		borrowed.Anchors = hints
+		if p, ok := locateByBlocks(&borrowed, num); ok {
+			return location{point: p, precision: Street, tight: streetSpan(s) <= maxStreetSpan, note: "PARALLEL_BLOCKS"}
+		}
+	}
+	if err == nil && len(s.Anchors) > 0 {
+		if p, ok := extrapolate(s, num); ok {
+			return location{point: p, precision: Street, note: "EXTRAPOLATED_FROM_ANCHORS"}
+		}
+	}
+	if near != nil {
+		if p, d := closestOnStreet(s, *near); d <= maxAreaDistance {
+			return location{point: p, precision: Street, tight: streetSpan(s) <= maxStreetSpan, note: "STREET_NEAR_AREA"}
+		}
+	}
 	return location{point: streetPoint(s), precision: Street, tight: streetSpan(s) <= maxStreetSpan}
+}
+
+// Locate ubica un número sobre una calle y devuelve el punto, el nivel de precisión
+// y, si la ubicación es estimada, el flag que dice cómo. Sirve para medir el error
+// de ubicación contra anclas reservadas (cmd/anchoreval).
+func Locate(s *snapshot.Street, number string, hints []snapshot.Anchor) (geo.Point, string, string) {
+	l := locateOnStreet(s, number, nil, hints)
+	return l.point, l.precision, l.note
+}
+
+// Suggestion es la ubicación estimada de un número sobre una calle.
+type Suggestion struct {
+	StreetID  int    `json:"street_id"`
+	Location  Point  `json:"location"`
+	Precision string `json:"precision_level"`
+	How       string `json:"how,omitempty"`
+	// Pins es cuántos pines de operadores, posteriores al snapshot, se usaron.
+	Pins int `json:"pins"`
+}
+
+// Suggest ubica un número sobre una calle del snapshot sumando anclas que todavía
+// no están en él (pines de operadores guardados después de construirlo). Así el
+// admin aprovecha cada pin en las demás direcciones de la calle sin esperar al
+// snapshot siguiente. No modifica el snapshot.
+func (r *Resolver) Suggest(streetID int, number string, extra []snapshot.Anchor, marks []snapshot.BlockMark) (Suggestion, bool) {
+	local, ok := r.withEdits(streetID, extra, marks)
+	if !ok {
+		return Suggestion{}, false
+	}
+	l := locateOnStreet(&local, number, nil, r.hints[r.byID[streetID]])
+	return Suggestion{StreetID: streetID, Location: *toPoint(l.point), Precision: l.precision, How: l.note, Pins: len(extra)}, true
+}
+
+// withEdits copia una calle del snapshot y le suma las anclas y marcas de cuadra
+// que todavía no están en él. Un ancla nueva reemplaza a la del mismo número.
+func (r *Resolver) withEdits(streetID int, extra []snapshot.Anchor, marks []snapshot.BlockMark) (snapshot.Street, bool) {
+	s := r.byID[streetID]
+	if s == nil {
+		return snapshot.Street{}, false
+	}
+	local := *s
+	local.Anchors = nil
+	replaced := map[int]bool{}
+	for _, a := range extra {
+		replaced[a.Number] = true
+	}
+	for _, a := range s.Anchors {
+		if !replaced[a.Number] {
+			local.Anchors = append(local.Anchors, a)
+		}
+	}
+	local.Anchors = append(local.Anchors, extra...)
+	sort.Slice(local.Anchors, func(i, j int) bool { return local.Anchors[i].Number < local.Anchors[j].Number })
+	local.Marks = append(append([]snapshot.BlockMark{}, s.Marks...), marks...)
+	return local, true
+}
+
+// StreetInfo identifica una calle del snapshot.
+type StreetInfo struct {
+	ID      int    `json:"street_id"`
+	Name    string `json:"name"`
+	Ubigeo  string `json:"ubigeo"`
+	Anchors int    `json:"anchors"`
+	Marks   int    `json:"marks"`
+}
+
+// FindStreets busca calles de un distrito cuyo nombre contiene el texto. Las que
+// no tienen números de puerta van primero: son las que más ganan con la edición.
+func (r *Resolver) FindStreets(ubigeo, q string, limit int) []StreetInfo {
+	key := txt.Key(q)
+	var out []StreetInfo
+	for i := range r.snap.Streets {
+		s := &r.snap.Streets[i]
+		if s.Ubigeo != ubigeo || (key != "" && !strings.Contains(s.Key, key)) {
+			continue
+		}
+		out = append(out, StreetInfo{ID: s.ID, Name: strings.TrimSpace(s.Type + " " + s.Name), Ubigeo: s.Ubigeo, Anchors: len(s.Anchors), Marks: len(s.Marks)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if (out[i].Anchors == 0) != (out[j].Anchors == 0) {
+			return out[i].Anchors == 0
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// Estado de una calle según cuántas de sus cuadras tienen centena.
+const (
+	CoverageFull    = "completa" // todas las cuadras numeradas
+	CoveragePartial = "parcial"  // algunas
+	CoverageNone    = "sin_datos"
+)
+
+// StreetShape es una calle en la vista general de un distrito.
+type StreetShape struct {
+	StreetInfo
+	Coverage string         `json:"coverage"`
+	Blocks   int            `json:"blocks"`
+	Numbered int            `json:"numbered"`
+	Lines    [][][2]float64 `json:"lines"`
+	Points   []AnchorInfo   `json:"anchor_points"`
+}
+
+// Overview devuelve todas las calles de un distrito con lo que se sabe de cada una:
+// sus números de puerta y cuántas de sus cuadras tienen centena. edits suma, por
+// calle, las anclas y marcas que todavía no están en el snapshot.
+func (r *Resolver) Overview(ubigeo string, edits func(streetID int) ([]snapshot.Anchor, []snapshot.BlockMark)) []StreetShape {
+	out := []StreetShape{}
+	for i := range r.snap.Streets {
+		if r.snap.Streets[i].Ubigeo != ubigeo {
+			continue
+		}
+		var extra []snapshot.Anchor
+		var marks []snapshot.BlockMark
+		if edits != nil {
+			extra, marks = edits(r.snap.Streets[i].ID)
+		}
+		d, ok := r.Detail(r.snap.Streets[i].ID, extra, marks)
+		if !ok {
+			continue
+		}
+		sh := StreetShape{StreetInfo: d.StreetInfo, Lines: d.Lines, Points: d.Anchors, Blocks: len(d.Blocks), Coverage: CoverageNone}
+		for _, b := range d.Blocks {
+			if b.Hundred != nil {
+				sh.Numbered++
+			}
+		}
+		switch {
+		case sh.Blocks > 0 && sh.Numbered == sh.Blocks:
+			sh.Coverage = CoverageFull
+		case sh.Numbered > 0 || len(d.Anchors) > 0:
+			sh.Coverage = CoveragePartial
+		}
+		out = append(out, sh)
+	}
+	return out
+}
+
+// Block es una cuadra de una calle: el tramo entre dos cruces, con su centena si se
+// conoce y de dónde sale.
+type Block struct {
+	From    Point  `json:"from"`
+	To      Point  `json:"to"`
+	Hundred *int   `json:"hundred"`
+	Source  string `json:"source,omitempty"`
+}
+
+// AnchorInfo es un número de puerta con ubicación conocida.
+type AnchorInfo struct {
+	Number   int    `json:"number"`
+	Location Point  `json:"location"`
+	Ref      string `json:"ref,omitempty"`
+}
+
+// StreetDetail es lo que el editor del admin dibuja de una calle.
+type StreetDetail struct {
+	StreetInfo
+	Lines   [][][2]float64 `json:"lines"` // tramos como listas de [lng, lat]
+	Blocks  []Block        `json:"blocks"`
+	Anchors []AnchorInfo   `json:"anchor_points"`
+}
+
+// Detail devuelve la geometría de una calle, sus cuadras numeradas y sus números de
+// puerta, sumando las anclas y marcas que todavía no están en el snapshot.
+func (r *Resolver) Detail(streetID int, extra []snapshot.Anchor, marks []snapshot.BlockMark) (StreetDetail, bool) {
+	s, ok := r.withEdits(streetID, extra, marks)
+	if !ok {
+		return StreetDetail{}, false
+	}
+	d := StreetDetail{StreetInfo: StreetInfo{ID: s.ID, Name: strings.TrimSpace(s.Type + " " + s.Name), Ubigeo: s.Ubigeo, Anchors: len(s.Anchors), Marks: len(s.Marks)},
+		Blocks: []Block{}, Anchors: []AnchorInfo{}}
+	for _, l := range s.Lines {
+		line := make([][2]float64, len(l))
+		for i, p := range l {
+			line[i] = [2]float64{p[0], p[1]}
+		}
+		d.Lines = append(d.Lines, line)
+	}
+	for _, a := range s.Anchors {
+		d.Anchors = append(d.Anchors, AnchorInfo{Number: a.Number, Location: *toPoint(a.Point), Ref: a.Ref})
+	}
+	m := newBlockModel(&s)
+	if m == nil {
+		m = bareBlocks(&s)
+	}
+	if m == nil {
+		return d, true
+	}
+	for j := range m.hund {
+		b := Block{From: *toPoint(m.axis.at(m.bounds[j])), To: *toPoint(m.axis.at(m.bounds[j+1])), Source: m.source[j]}
+		if m.source[j] != "" {
+			h := m.hund[j]
+			b.Hundred = &h
+		}
+		d.Blocks = append(d.Blocks, b)
+	}
+	return d, true
+}
+
+// bareBlocks arma las cuadras de una calle sin datos, solo para dibujarlas.
+func bareBlocks(s *snapshot.Street) *blockModel {
+	if len(s.Lines) == 0 {
+		return nil
+	}
+	probe := *s
+	probe.Marks = []snapshot.BlockMark{{Hundred: 0, Point: s.Lines[0][0]}}
+	m := newBlockModel(&probe)
+	if m == nil {
+		return nil
+	}
+	for j := range m.source {
+		m.source[j] = ""
+	}
+	return m
 }
 
 // maxStreetSpan es la mayor extensión de una calle cuyo punto medio sirve como
@@ -368,18 +674,18 @@ func interpolate(anchors []snapshot.Anchor, num int, sameParity bool) (location,
 		for _, a := range exact[1:] {
 			tight = tight && dist(a.Point, exact[0].Point) <= 50
 		}
-		return location{exact[0].Point, AddressPoint, tight}, true
+		return location{point: exact[0].Point, precision: AddressPoint, tight: tight}, true
 	}
 	switch {
 	case lo != nil && hi != nil && hi.Number-lo.Number <= 400 && dist(lo.Point, hi.Point) <= 1500:
 		t := float64(num-lo.Number) / float64(hi.Number-lo.Number)
 		p := geo.Point{lo.Point[0] + t*(hi.Point[0]-lo.Point[0]), lo.Point[1] + t*(hi.Point[1]-lo.Point[1])}
 		tight := hi.Number-lo.Number <= maxTightGap && dist(lo.Point, hi.Point) <= 250
-		return location{p, SegmentInterpolated, tight}, true
+		return location{point: p, precision: SegmentInterpolated, tight: tight}, true
 	case lo != nil && num-lo.Number <= 30:
-		return location{lo.Point, SegmentInterpolated, false}, true
+		return location{point: lo.Point, precision: SegmentInterpolated, tight: false}, true
 	case hi != nil && hi.Number-num <= 30:
-		return location{hi.Point, SegmentInterpolated, false}, true
+		return location{point: hi.Point, precision: SegmentInterpolated, tight: false}, true
 	}
 	return location{}, false
 }

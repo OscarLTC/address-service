@@ -73,6 +73,7 @@ func main() {
 	dataDir := flag.String("data", "data", "directorio de datos")
 	split := flag.String("split", "test", "partición a medir (test, dev o all)")
 	examples := flag.Int("examples", 15, "peores casos a mostrar (solo con -split dev)")
+	ubigeo := flag.String("ubigeo", "", "si se indica, mide solo las filas que el resolver ubica en ese distrito")
 	quality := flag.String("quality", "", "si se indica (oro o plata), usa solo filas de GPS de entrega de esa calidad o mejor")
 	flag.Parse()
 
@@ -137,9 +138,12 @@ func main() {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		total++
 		r := res.Geocode(normalizer.Request{Address: row.RawAddress, District: row.DistrictField,
 			Province: row.ProvinceField, Department: row.DepartmentField})
+		if *ubigeo != "" && r.Ubigeo != *ubigeo {
+			continue
+		}
+		total++
 		if decisions[row.Source] == nil {
 			decisions[row.Source] = map[string]int{}
 		}

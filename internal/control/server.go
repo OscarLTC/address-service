@@ -61,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /admin/api/export/verified.csv", s.auth(http.HandlerFunc(s.exportVerified)))
 	mux.Handle("GET /admin/api/tickets/{id}", s.auth(http.HandlerFunc(s.getTicket)))
 	mux.Handle("POST /admin/api/tickets/{id}/resolve", s.auth(http.HandlerFunc(s.resolve)))
+	s.editorRoutes(mux)
 	return mux
 }
 
@@ -234,7 +235,11 @@ func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	ts, err := s.store.ListTickets(r.Context(), status, limit)
+	sortBy := r.URL.Query().Get("sort")
+	if sortBy != SortFrequency {
+		sortBy = SortYield
+	}
+	ts, err := s.store.ListTickets(r.Context(), status, sortBy, limit)
 	if err != nil {
 		s.logger.Error("cola", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo leer la cola"})
@@ -259,7 +264,44 @@ func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudo leer el ticket"})
 		return
 	}
+	if err := s.suggest(r.Context(), t); err != nil {
+		// Sin sugerencias el ticket igual se puede resolver a mano.
+		s.logger.Error("sugerencias", "ticket", id, "error", err)
+	}
 	writeJSON(w, http.StatusOK, t)
+}
+
+// suggest calcula dónde cae el número del ticket en cada calle candidata, sumando
+// los pines de operadores y las ediciones manuales guardados en esas calles desde el
+// último snapshot.
+func (s *Server) suggest(ctx context.Context, t *TicketDetail) error {
+	var parse struct {
+		Components struct {
+			Number string `json:"number"`
+		} `json:"components"`
+	}
+	var cands struct {
+		Candidates []struct {
+			StreetID int64 `json:"street_id"`
+		} `json:"candidates"`
+	}
+	_ = json.Unmarshal(t.Parse, &parse)
+	_ = json.Unmarshal(t.Candidates, &cands)
+	ids := make([]int64, 0, len(cands.Candidates))
+	for _, c := range cands.Candidates {
+		ids = append(ids, c.StreetID)
+	}
+	edits, err := s.store.Edits(ctx, ids)
+	for _, id := range ids {
+		e := edits[id]
+		if e == nil {
+			e = &StreetEdits{}
+		}
+		if sg, ok := s.resolver.Suggest(int(id), parse.Components.Number, e.Anchors, e.Marks); ok {
+			t.Suggestions = append(t.Suggestions, sg)
+		}
+	}
+	return err
 }
 
 func (s *Server) resolve(w http.ResponseWriter, r *http.Request) {

@@ -10,11 +10,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"addrsvc/internal/geo"
+	"addrsvc/internal/resolver"
+	"addrsvc/internal/snapshot"
 	"addrsvc/internal/txt"
 )
 
@@ -95,26 +100,79 @@ type TicketSummary struct {
 	District    string    `json:"district"`
 	Reason      string    `json:"reason"`
 	CreatedAt   time.Time `json:"created_at"`
+	// StreetOccurrences suma las ocurrencias de los tickets de la cola que comparten
+	// la primera calle candidata: es lo que rinde un pin en esa calle.
+	StreetOccurrences int `json:"street_occurrences"`
 }
 
-// ListTickets devuelve la cola ordenada por prioridad (frecuencia) y antigüedad.
-func (s *Store) ListTickets(ctx context.Context, status string, limit int) ([]TicketSummary, error) {
+// Órdenes de la cola.
+const (
+	SortFrequency = "frequency" // por frecuencia de la dirección y antigüedad
+	SortYield     = "yield"     // por rendimiento: primero las calles con más pedidos en cola
+)
+
+// ListTickets devuelve la cola. Con SortYield agrupa los tickets por su primera
+// calle candidata y pone primero las calles que más ocurrencias suman: un pin en
+// una de ellas ayuda a ubicar a las demás.
+func (s *Store) ListTickets(ctx context.Context, status, sortBy string, limit int) ([]TicketSummary, error) {
+	order := "priority DESC, created_at"
+	if sortBy == SortYield {
+		order = "street_occurrences DESC, street_id NULLS LAST, priority DESC, created_at"
+	}
 	rows, err := s.db.Query(ctx, `
-		SELECT t.id, t.status, t.priority, t.occurrences, coalesce(t.raw_input->>'address',''),
-		       coalesce(t.parse->>'normalized',''), coalesce(t.ubigeo_code,''), coalesce(u.district,''),
-		       coalesce(t.candidates->>'reason',''), t.created_at
-		FROM review_tickets t LEFT JOIN ubigeos u ON u.code = t.ubigeo_code
-		WHERE t.status = $1
-		ORDER BY t.priority DESC, t.created_at
+		WITH q AS (
+			SELECT t.id, t.status, t.priority, t.occurrences, coalesce(t.raw_input->>'address','') AS address,
+			       coalesce(t.parse->>'normalized','') AS normalized, coalesce(t.ubigeo_code,'') AS ubigeo,
+			       coalesce(u.district,'') AS district, coalesce(t.candidates->>'reason','') AS reason, t.created_at,
+			       t.candidates->'candidates'->0->>'street_id' AS street_id
+			FROM review_tickets t LEFT JOIN ubigeos u ON u.code = t.ubigeo_code
+			WHERE t.status = $1
+		)
+		SELECT id, status, priority, occurrences, address, normalized, ubigeo, district, reason, created_at,
+		       (CASE WHEN street_id IS NULL THEN occurrences ELSE sum(occurrences) OVER (PARTITION BY street_id) END)::int AS street_occurrences
+		FROM q
+		ORDER BY `+order+`
 		LIMIT $2`, status, limit)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (TicketSummary, error) {
 		var t TicketSummary
-		err := r.Scan(&t.ID, &t.Status, &t.Priority, &t.Occurrences, &t.Address, &t.Normalized, &t.Ubigeo, &t.District, &t.Reason, &t.CreatedAt)
+		err := r.Scan(&t.ID, &t.Status, &t.Priority, &t.Occurrences, &t.Address, &t.Normalized, &t.Ubigeo, &t.District, &t.Reason, &t.CreatedAt, &t.StreetOccurrences)
 		return t, err
 	})
+}
+
+// StreetPins devuelve, por calle, los pines de operadores con número de puerta: el
+// último de cada dirección. Sirven como anclas antes de que entren al snapshot.
+func (s *Store) StreetPins(ctx context.Context, streetIDs []int64) (map[int64][]snapshot.Anchor, error) {
+	out := map[int64][]snapshot.Anchor{}
+	if len(streetIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT DISTINCT ON (ca.id) ca.street_id, ca.house_number, ST_X(o.location), ST_Y(o.location), o.id
+		FROM canonical_addresses ca JOIN observations o ON o.canonical_address_id = ca.id
+		WHERE ca.street_id = ANY($1) AND o.method = 'pin_operador' AND ca.house_number IS NOT NULL
+		ORDER BY ca.id, o.created_at DESC`, streetIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var streetID, obsID int64
+		var number string
+		var lng, lat float64
+		if err := rows.Scan(&streetID, &number, &lng, &lat, &obsID); err != nil {
+			return nil, err
+		}
+		n, err := strconv.Atoi(strings.TrimRightFunc(number, func(r rune) bool { return r < '0' || r > '9' }))
+		if err != nil {
+			continue
+		}
+		out[streetID] = append(out[streetID], snapshot.Anchor{Number: n, Point: geo.Point{lng, lat}, Ref: fmt.Sprintf("obs:%d", obsID)})
+	}
+	return out, rows.Err()
 }
 
 // TicketDetail es un ticket con la geometría que necesita el mapa.
@@ -133,6 +191,9 @@ type TicketDetail struct {
 	// candidatas como FeatureCollection (propiedad street_id).
 	DistrictGeoJSON json.RawMessage `json:"district_geojson,omitempty"`
 	StreetsGeoJSON  json.RawMessage `json:"streets_geojson,omitempty"`
+	// Suggestions es la ubicación estimada del número en cada calle candidata,
+	// calculada al abrir el ticket con los pines guardados hasta ese momento.
+	Suggestions []resolver.Suggestion `json:"suggestions,omitempty"`
 }
 
 // GetTicket devuelve un ticket con su geometría.

@@ -31,6 +31,10 @@ const (
 		`rel(area.a)["admin_level"="8"]["boundary"="administrative"]["pe:ubigeo"];out geom;`
 	qAddresses = `[out:json][timeout:300];` + areas +
 		`nwr(area.a)["addr:street"]["addr:housenumber"];out tags center;`
+	// Puntos con número de puerta pero sin calle anotada: la calle se deduce por
+	// cercanía al construir el snapshot.
+	qHouseNumbers = `[out:json][timeout:300];` + areas +
+		`nwr(area.a)["addr:housenumber"][!"addr:street"];out tags center;`
 	qAreas = `[out:json][timeout:300];` + areas +
 		`(nwr(area.a)["place"~"^(neighbourhood|suburb|quarter|hamlet)$"]["name"];nwr(area.a)["landuse"="residential"]["name"];);out tags center;`
 	// La relación de OSM r se consulta como el área 3600000000 + r.
@@ -51,9 +55,10 @@ func main() {
 
 	districtsPath := filepath.Join(*out, "districts.json")
 	for path, q := range map[string]string{
-		districtsPath:                         qDistricts,
-		filepath.Join(*out, "addresses.json"): qAddresses,
-		filepath.Join(*out, "areas.json"):     qAreas,
+		districtsPath:                            qDistricts,
+		filepath.Join(*out, "addresses.json"):    qAddresses,
+		filepath.Join(*out, "housenumbers.json"): qHouseNumbers,
+		filepath.Join(*out, "areas.json"):        qAreas,
 	} {
 		if err := c.fetchTo(path, q, *force); err != nil {
 			log.Fatal(err)

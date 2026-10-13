@@ -26,6 +26,13 @@ type Anchor struct {
 	Ref    string // origen, p. ej. "osm:n123"
 }
 
+// BlockMark es la centena que un operador le asignó a una cuadra: la que pasa por
+// Point. "Cuadra 12" es Hundred 12 (números del 1200 al 1299).
+type BlockMark struct {
+	Hundred int
+	Point   geo.Point
+}
+
 // Street es una calle canónica dentro de un distrito.
 type Street struct {
 	ID       int
@@ -39,6 +46,10 @@ type Street struct {
 	Refs     []string // ways de OSM de origen
 	// Aliases son claves (txt.Key) de grafías promovidas por operadores.
 	Aliases []string
+	// Crossings son los cruces con otras calles: delimitan las cuadras.
+	Crossings []geo.Point
+	// Marks son las cuadras numeradas a mano por operadores.
+	Marks []BlockMark
 }
 
 // Area es una urbanización, AA.HH. o asociación con nombre y centro conocido.

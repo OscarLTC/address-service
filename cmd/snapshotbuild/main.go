@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -125,15 +126,32 @@ func main() {
 			b.addWay(e)
 		}
 	}
+	if *dsn != "" {
+		n, err := b.loadManualStreets(*dsn)
+		if err != nil {
+			log.Fatalf("calles trazadas a mano: %v", err)
+		}
+		log.Printf("calles trazadas a mano: %d", n)
+	}
 	split := b.finalize()
-	log.Printf("calles: %d en %d nombres (%d nombres con homónimas separadas; ways leídos %d, sin distrito %d, omitidos %d)",
-		len(b.streets), len(b.groups), split, b.ways, b.noDistrict, b.skipped)
+	log.Printf("cruces: %d", b.addCrossings())
+	log.Printf("calles: %d en %d nombres (%d nombres con homónimas separadas; %d alias de OSM; ways leídos %d, sin distrito %d, omitidos %d)",
+		len(b.streets), len(b.groups), split, b.aliases, b.ways, b.noDistrict, b.skipped)
 
 	addrs, _, err := readOSM(filepath.Join(*osmDir, "addresses.json"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	st := b.addAnchors(addrs, excluded)
+	// Puntos con número pero sin calle anotada: opcionales (cmd/osmfetch reciente).
+	if loose, _, err := readOSM(filepath.Join(*osmDir, "housenumbers.json")); err == nil {
+		grid := b.streetGrid()
+		tried, right := b.checkNearest(grid, addrs)
+		log.Printf("regla de cercanía contra los puntos con calle anotada: asigna %d, acierta %d (%.1f %%)", tried, right, 100*float64(right)/float64(max(1, tried)))
+		for k, v := range b.addHouseNumbers(grid, loose) {
+			st["por_cercania_"+k] = v
+		}
+	}
 	st["descartada_inconsistente"] = b.dropInconsistent()
 	log.Printf("anclas: %v", st)
 
@@ -152,6 +170,11 @@ func main() {
 			log.Fatalf("verificadas: %v", err)
 		}
 		log.Printf("direcciones verificadas: %d (%v)", len(verified), st)
+		edits, err := b.loadManualEdits(*dsn)
+		if err != nil {
+			log.Fatalf("ediciones manuales: %v", err)
+		}
+		log.Printf("ediciones manuales: %v", edits)
 		promoted, total, err := b.loadAliases(*dsn)
 		if err != nil {
 			log.Fatalf("alias: %v", err)
@@ -215,7 +238,7 @@ type builder struct {
 	streets   []*snapshot.Street
 	ids       map[int]bool
 
-	ways, noDistrict, skipped int
+	ways, noDistrict, skipped, aliases int
 }
 
 // group reúne los tramos de OSM con el mismo nombre en un distrito.
@@ -223,7 +246,11 @@ type group struct {
 	ubigeo, typ, display string
 	lines                [][]geo.Point
 	refs                 []string
+	aliases              map[string]bool // claves de los otros nombres de OSM
 }
+
+// aliasTags son las etiquetas de OSM con otros nombres de la misma calle.
+var aliasTags = []string{"alt_name", "old_name", "official_name", "short_name"}
 
 // joinDistance es la distancia máxima entre tramos para considerarlos la misma calle.
 const joinDistance = 30.0
@@ -267,9 +294,16 @@ func (b *builder) addWay(e osmElement) {
 	k := streetKey(codes[0], typ, txt.Key(display))
 	g := b.groups[k]
 	if g == nil {
-		g = &group{ubigeo: codes[0], typ: typ, display: display}
+		g = &group{ubigeo: codes[0], typ: typ, display: display, aliases: map[string]bool{}}
 		b.groups[k] = g
 		b.order = append(b.order, k)
+	}
+	for _, tag := range aliasTags {
+		for _, v := range strings.Split(e.Tags[tag], ";") {
+			if _, alt := b.streetName(v); alt != "" && txt.Key(alt) != txt.Key(display) {
+				g.aliases[txt.Key(alt)] = true
+			}
+		}
 	}
 	g.lines = append(g.lines, line)
 	g.refs = append(g.refs, "w"+strconv.FormatInt(e.ID, 10))
@@ -279,9 +313,22 @@ func (b *builder) addWay(e osmElement) {
 // repite en urbanizaciones distintas del mismo distrito ("Calle Los Geranios"), y
 // esas son calles distintas. Devuelve cuántos nombres tenían más de una componente.
 func (b *builder) finalize() int {
+	// Un alias que es el nombre canónico de otra calle del distrito no se usa.
+	canonical := map[string]bool{}
+	for _, g := range b.groups {
+		canonical[g.ubigeo+"|"+txt.Key(g.display)] = true
+	}
 	split := 0
 	for _, k := range b.order {
 		g := b.groups[k]
+		var aliases []string
+		for a := range g.aliases {
+			if !canonical[g.ubigeo+"|"+a] {
+				aliases = append(aliases, a)
+			}
+		}
+		sort.Strings(aliases)
+		b.aliases += len(aliases)
 		comps := components(g.lines)
 		if len(comps) > 1 {
 			split++
@@ -290,6 +337,7 @@ func (b *builder) finalize() int {
 			st := &snapshot.Street{
 				Ubigeo: g.ubigeo, Type: g.typ, Name: g.display,
 				Key: txt.Key(g.display), Phonetic: txt.Phonetic(g.display),
+				Aliases: aliases,
 			}
 			for _, i := range comp {
 				st.Lines = append(st.Lines, g.lines[i])
@@ -301,6 +349,41 @@ func (b *builder) finalize() int {
 		}
 	}
 	return split
+}
+
+// addCrossings marca en cada calle los vértices que comparte con una calle de otro
+// nombre: en OSM dos vías que se cruzan comparten el nodo. Devuelve cuántos marcó.
+func (b *builder) addCrossings() int {
+	at := map[geo.Point][]*snapshot.Street{}
+	for _, s := range b.streets {
+		for _, l := range s.Lines {
+			for _, p := range l {
+				if n := len(at[p]); n == 0 || at[p][n-1] != s {
+					at[p] = append(at[p], s)
+				}
+			}
+		}
+	}
+	total := 0
+	for _, s := range b.streets {
+		seen := map[geo.Point]bool{}
+		for _, l := range s.Lines {
+			for _, p := range l {
+				if seen[p] {
+					continue
+				}
+				for _, o := range at[p] {
+					if o.Key != s.Key {
+						seen[p] = true
+						s.Crossings = append(s.Crossings, p)
+						total++
+						break
+					}
+				}
+			}
+		}
+	}
+	return total
 }
 
 // stableID deriva el id de la calle del distrito, el tipo, el nombre y el way de OSM
@@ -457,6 +540,126 @@ func (b *builder) loadVerified(dsn string) ([]snapshot.Verified, map[string]int,
 	return out, st, rows.Err()
 }
 
+// loadManualStreets suma las calles trazadas a mano en el admin como tramos: si una
+// toca a una calle de OSM con el mismo nombre, la extiende; si no, es una calle nueva.
+func (b *builder) loadManualStreets(dsn string) (int, error) {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close(ctx)
+	rows, err := conn.Query(ctx, `SELECT id, ubigeo_code, street_type, name, ST_AsGeoJSON(geom)
+		FROM manual_streets WHERE deleted_at IS NULL ORDER BY id`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var id int64
+		var ubigeo, typ, name, gj string
+		if err := rows.Scan(&id, &ubigeo, &typ, &name, &gj); err != nil {
+			return 0, err
+		}
+		var g struct {
+			Coordinates [][2]float64 `json:"coordinates"`
+		}
+		if err := json.Unmarshal([]byte(gj), &g); err != nil || len(g.Coordinates) < 2 {
+			continue
+		}
+		ctyp, display := b.streetName(strings.TrimSpace(typ + " " + name))
+		if display == "" {
+			log.Printf("calle trazada %d: el nombre %q no se pudo normalizar, se omite", id, name)
+			continue
+		}
+		line := make([]geo.Point, len(g.Coordinates))
+		for i, c := range g.Coordinates {
+			line[i] = geo.Point{c[0], c[1]}
+		}
+		k := streetKey(ubigeo, ctyp, txt.Key(display))
+		grp := b.groups[k]
+		if grp == nil {
+			grp = &group{ubigeo: ubigeo, typ: ctyp, display: display, aliases: map[string]bool{}}
+			b.groups[k] = grp
+			b.order = append(b.order, k)
+		}
+		grp.lines = append(grp.lines, line)
+		grp.refs = append(grp.refs, "m"+strconv.FormatInt(id, 10))
+		n++
+	}
+	return n, rows.Err()
+}
+
+// loadManualEdits suma los números de puerta puestos a mano (reemplazan al ancla de
+// OSM del mismo número) y las cuadras numeradas por operadores.
+func (b *builder) loadManualEdits(dsn string) (map[string]int, error) {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+	byID := map[int]*snapshot.Street{}
+	for _, s := range b.streets {
+		byID[s.ID] = s
+	}
+	st := map[string]int{}
+	rows, err := conn.Query(ctx, `SELECT id, street_id, house_number, ST_X(location), ST_Y(location)
+		FROM manual_anchors WHERE deleted_at IS NULL ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id, streetID int64
+		var number int
+		var lng, lat float64
+		if err := rows.Scan(&id, &streetID, &number, &lng, &lat); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		s := byID[int(streetID)]
+		if s == nil {
+			st["numero_sin_calle"]++
+			continue
+		}
+		kept := s.Anchors[:0]
+		for _, a := range s.Anchors {
+			if a.Number != number {
+				kept = append(kept, a)
+			}
+		}
+		s.Anchors = append(kept, snapshot.Anchor{Number: number, Point: geo.Point{lng, lat}, Ref: "manual:" + strconv.FormatInt(id, 10)})
+		st["numeros"]++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = conn.Query(ctx, `SELECT street_id, hundred, ST_X(location), ST_Y(location)
+		FROM block_marks WHERE deleted_at IS NULL ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var streetID int64
+		var hundred int
+		var lng, lat float64
+		if err := rows.Scan(&streetID, &hundred, &lng, &lat); err != nil {
+			return nil, err
+		}
+		s := byID[int(streetID)]
+		if s == nil {
+			st["cuadra_sin_calle"]++
+			continue
+		}
+		s.Marks = append(s.Marks, snapshot.BlockMark{Hundred: hundred, Point: geo.Point{lng, lat}})
+		st["cuadras"]++
+	}
+	return st, rows.Err()
+}
+
 // minAliasConfirmations es cuántos operadores distintos deben confirmar un alias.
 const minAliasConfirmations = 2
 
@@ -524,6 +727,142 @@ func nearest(p geo.Point, cands []*snapshot.Street) (*snapshot.Street, float64) 
 		}
 	}
 	return best, bestD
+}
+
+// Regla de cercanía: un punto sin calle anotada se asigna a la calle más cercana
+// solo si está pegado a ella y la siguiente calle de otro nombre queda claramente
+// más lejos (en una esquina no se sabe a cuál de las dos pertenece).
+const (
+	nearMaxDistance = 40.0 // metros a la calle
+	nearRatio       = 2.0  // la segunda calle debe estar a más de nearRatio veces...
+	nearMargin      = 15.0 // ...más este margen en metros
+	gridCell        = 0.001
+)
+
+type streetGrid map[[2]int][]*snapshot.Street
+
+func gridKey(p geo.Point) [2]int {
+	return [2]int{int(math.Floor(p[0] / gridCell)), int(math.Floor(p[1] / gridCell))}
+}
+
+// streetGrid indexa las calles por celda (~110 m) para buscar las cercanas a un punto.
+func (b *builder) streetGrid() streetGrid {
+	g := streetGrid{}
+	for _, s := range b.streets {
+		seen := map[[2]int]bool{}
+		for _, l := range s.Lines {
+			for i := 1; i < len(l); i++ {
+				steps := int(geo.DistanceM(l[i-1], l[i])/50) + 1
+				for k := 0; k <= steps; k++ {
+					t := float64(k) / float64(steps)
+					c := gridKey(geo.Point{l[i-1][0] + t*(l[i][0]-l[i-1][0]), l[i-1][1] + t*(l[i][1]-l[i-1][1])})
+					if !seen[c] {
+						seen[c] = true
+						g[c] = append(g[c], s)
+					}
+				}
+			}
+		}
+	}
+	return g
+}
+
+// near devuelve la calle que la regla de cercanía asigna al punto, o nil.
+func (g streetGrid) near(p geo.Point) *snapshot.Street {
+	c := gridKey(p)
+	var best *snapshot.Street
+	d1, d2 := math.Inf(1), math.Inf(1)
+	byName := map[string]float64{} // distancia mínima por nombre
+	owner := map[string]*snapshot.Street{}
+	for dx := -1; dx <= 1; dx++ {
+		for dy := -1; dy <= 1; dy++ {
+			for _, s := range g[[2]int{c[0] + dx, c[1] + dy}] {
+				d := math.Inf(1)
+				for _, l := range s.Lines {
+					d = math.Min(d, geo.LineDistanceM(p, l))
+				}
+				if cur, ok := byName[s.Key]; !ok || d < cur {
+					byName[s.Key], owner[s.Key] = d, s
+				}
+			}
+		}
+	}
+	for k, d := range byName {
+		switch {
+		case d < d1:
+			best, d1, d2 = owner[k], d, d1
+		case d < d2:
+			d2 = d
+		}
+	}
+	if best == nil || d1 > nearMaxDistance || d2 < nearRatio*d1+nearMargin {
+		return nil
+	}
+	return best
+}
+
+// checkNearest mide la regla de cercanía contra los puntos que sí traen la calle
+// anotada: cuántos asigna y en cuántos coincide con el nombre anotado.
+func (b *builder) checkNearest(g streetGrid, els []osmElement) (tried, right int) {
+	for _, e := range els {
+		_, display := b.streetName(e.Tags["addr:street"])
+		if display == "" {
+			continue
+		}
+		lat, lng := e.Lat, e.Lon
+		if e.Center != nil {
+			lat, lng = e.Center.Lat, e.Center.Lon
+		}
+		s := g.near(geo.Point{lng, lat})
+		if s == nil {
+			continue
+		}
+		tried++
+		key := txt.Key(display)
+		if s.Key == key {
+			right++
+			continue
+		}
+		for _, a := range s.Aliases {
+			if a == key {
+				right++
+				break
+			}
+		}
+	}
+	return tried, right
+}
+
+// addHouseNumbers suma como anclas los puntos con número de puerta y sin calle
+// anotada que la regla de cercanía puede asignar.
+func (b *builder) addHouseNumbers(g streetGrid, els []osmElement) map[string]int {
+	st := map[string]int{}
+	for _, e := range els {
+		// Con addr:plot el número es el del lote dentro de su manzana, no el de la puerta.
+		if e.Tags["addr:plot"] != "" {
+			st["es_lote"]++
+			continue
+		}
+		m := reNum.FindStringSubmatch(strings.TrimSpace(e.Tags["addr:housenumber"]))
+		if m == nil {
+			st["numero_no_simple"]++
+			continue
+		}
+		num, _ := strconv.Atoi(m[1])
+		lat, lng := e.Lat, e.Lon
+		if e.Center != nil {
+			lat, lng = e.Center.Lat, e.Center.Lon
+		}
+		p := geo.Point{lng, lat}
+		s := g.near(p)
+		if s == nil {
+			st["sin_calle_clara"]++
+			continue
+		}
+		s.Anchors = append(s.Anchors, snapshot.Anchor{Number: num, Point: p, Ref: "osm:" + e.Type[:1] + strconv.FormatInt(e.ID, 10) + ":cercania"})
+		st["ok"]++
+	}
+	return st
 }
 
 // addAnchors asocia los puntos addr:* a su calle (mismo distrito y nombre).
