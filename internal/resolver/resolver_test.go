@@ -243,3 +243,18 @@ func TestOSMAliases(t *testing.T) {
 		t.Errorf("otro nombre debe ir a revisión: %s %s", got.ResolutionType, got.Decision)
 	}
 }
+
+// Dos marcas con centenas distintas en un mismo tramo entre cruces de OSM señalan
+// un cruce que falta: la cuadra se parte entre ellas.
+func TestMarksSplitBlock(t *testing.T) {
+	// ~600 m de este a oeste; OSM solo tiene cruces a ~200 m y ~400 m.
+	s := street(1, "150122", "CALLE", "LAS PRUEBAS", [][]geo.Point{{{-77.0400, -12.0800}, {-77.0345, -12.0800}}})
+	s.Crossings = []geo.Point{{-77.03817, -12.0800}, {-77.03633, -12.0800}}
+	// La esquina entre la cuadra 1 y la 2 está a ~100 m: una marca a cada lado.
+	s.Marks = []snapshot.BlockMark{{Hundred: 1, Point: geo.Point{-77.03912, -12.0800}}, {Hundred: 2, Point: geo.Point{-77.03904, -12.0800}}}
+	p, prec, note := resolver.Locate(&s, "250", nil)
+	// La cuadra 2 va de ~100 m a ~200 m: el 250 queda a ~150 m del inicio.
+	if want := -77.03862; prec != resolver.SegmentInterpolated || p[0] < want-0.00023 || p[0] > want+0.00023 {
+		t.Errorf("el 250 debe quedar a la mitad de la cuadra 2: %v %s %s", p, prec, note)
+	}
+}

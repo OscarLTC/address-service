@@ -50,6 +50,34 @@ type blockModel struct {
 // 100 y c, su progresiva sobre el eje.
 type control struct{ x, c float64 }
 
+// splitByMarks parte una cuadra en la que caen marcas de operadores con centenas
+// distintas: OSM no tiene ese cruce. El corte va entre las dos marcas, que en
+// general se ponen a ambos lados de la esquina.
+func splitByMarks(a *axis, bounds []float64, marks []snapshot.BlockMark) []float64 {
+	type mk struct {
+		c float64
+		h int
+	}
+	ms := make([]mk, len(marks))
+	for i, x := range marks {
+		ms[i] = mk{a.chainage(x.Point), x.Hundred}
+	}
+	sort.Slice(ms, func(i, j int) bool { return ms[i].c < ms[j].c })
+	blockOf := func(c float64) int { return sort.SearchFloat64s(bounds, c) }
+	var extra []float64
+	for i := 1; i < len(ms); i++ {
+		if p, q := ms[i-1], ms[i]; p.h != q.h && blockOf(p.c) == blockOf(q.c) {
+			extra = append(extra, (p.c+q.c)/2)
+		}
+	}
+	if len(extra) == 0 {
+		return bounds
+	}
+	out := append(append([]float64{}, bounds...), extra...)
+	sort.Float64s(out)
+	return out
+}
+
 // newBlockModel arma las cuadras de la calle. Devuelve nil si no hay con qué
 // numerarlas: hacen falta cruces y anclas, o al menos una marca de operador.
 func newBlockModel(s *snapshot.Street) *blockModel {
@@ -73,6 +101,7 @@ func newBlockModel(s *snapshot.Street) *blockModel {
 	} else {
 		bounds[len(bounds)-1] = a.hi
 	}
+	bounds = splitByMarks(a, bounds, s.Marks)
 	n := len(bounds) - 1
 	if n < 1 || bounds[n] <= bounds[0] {
 		return nil

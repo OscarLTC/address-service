@@ -438,7 +438,9 @@ const (
 // calle: el más cercano a la urbanización (near) si se conoce, o el central.
 func locateOnStreet(s *snapshot.Street, number string, near *geo.Point, hints []snapshot.Anchor) location {
 	num, err := strconv.Atoi(strings.TrimRightFunc(number, func(r rune) bool { return r < '0' || r > '9' }))
-	if err == nil && len(s.Anchors) > 0 {
+	// Una calle sin números de puerta pero con cuadras marcadas por operadores también
+	// se ubica con el modelo de cuadras.
+	if err == nil && (len(s.Anchors) > 0 || len(s.Marks) > 0) {
 		if l, ok := interpolate(s.Anchors, num, true); ok {
 			return l
 		}
