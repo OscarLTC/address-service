@@ -384,3 +384,49 @@ func TestManualEdits(t *testing.T) {
 		t.Errorf("calle fuera del distrito: %d", code)
 	}
 }
+
+// Una calle trazada a mano se lista en su distrito apenas se guarda y deja de
+// listarse al quitarla.
+func TestDrawnStreets(t *testing.T) {
+	dsn := os.Getenv("ADDRSVC_TEST_DB")
+	if dsn == "" {
+		t.Skip("ADDRSVC_TEST_DB no definido")
+	}
+	ctx := context.Background()
+	store, err := NewStore(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	const actor = "trazo-prueba"
+	t.Cleanup(func() { _, _ = store.db.Exec(ctx, `DELETE FROM manual_streets WHERE created_by = $1`, actor) })
+	var lng, lat float64
+	if err := store.db.QueryRow(ctx, `SELECT ST_X(ST_PointOnSurface(polygon)), ST_Y(ST_PointOnSurface(polygon)) FROM ubigeos WHERE code = '150116'`).Scan(&lng, &lat); err != nil {
+		t.Skip("sin el polígono de Lince en la base")
+	}
+	id, err := store.AddManualStreet(ctx, "150116", "Calle", "Trazada De Prueba", [][2]float64{{lng, lat}, {lng + 0.001, lat}}, actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func() bool {
+		ms, err := store.ManualStreets(ctx, "150116")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range ms {
+			if m.ID == id {
+				return len(m.Geometry) > 0
+			}
+		}
+		return false
+	}
+	if !has() {
+		t.Fatal("la calle trazada no aparece en su distrito")
+	}
+	if err := store.RemoveEdit(ctx, "streets", id); err != nil {
+		t.Fatal(err)
+	}
+	if has() {
+		t.Error("la calle quitada sigue apareciendo")
+	}
+}

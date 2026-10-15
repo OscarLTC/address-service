@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"addrsvc/internal/geo"
 	"addrsvc/internal/resolver"
@@ -178,6 +181,31 @@ func (s *Store) AddManualStreet(ctx context.Context, ubigeo, streetType, name st
 	return id, err
 }
 
+// ManualStreet es una calle trazada a mano, vigente.
+type ManualStreet struct {
+	ID        int64           `json:"id"`
+	Type      string          `json:"street_type"`
+	Name      string          `json:"name"`
+	CreatedBy string          `json:"created_by"`
+	CreatedAt time.Time       `json:"created_at"`
+	Geometry  json.RawMessage `json:"geometry"` // GeoJSON LineString
+}
+
+// ManualStreets devuelve las calles trazadas a mano en un distrito. Se ven en el
+// mapa del editor apenas se guardan, antes de entrar al snapshot.
+func (s *Store) ManualStreets(ctx context.Context, ubigeo string) ([]ManualStreet, error) {
+	rows, err := s.db.Query(ctx, `SELECT id, street_type, name, created_by, created_at, ST_AsGeoJSON(geom, 7)::json
+		FROM manual_streets WHERE ubigeo_code = $1 AND deleted_at IS NULL ORDER BY id`, ubigeo)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ManualStreet, error) {
+		var m ManualStreet
+		err := r.Scan(&m.ID, &m.Type, &m.Name, &m.CreatedBy, &m.CreatedAt, &m.Geometry)
+		return m, err
+	})
+}
+
 // RemoveEdit quita una edición manual (no la borra: queda con deleted_at).
 func (s *Store) RemoveEdit(ctx context.Context, kind string, id int64) error {
 	table := map[string]string{"marks": "block_marks", "anchors": "manual_anchors", "streets": "manual_streets"}[kind]
@@ -195,6 +223,7 @@ func (s *Store) RemoveEdit(ctx context.Context, kind string, id int64) error {
 func (s *Server) editorRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /admin/api/streets", s.auth(http.HandlerFunc(s.findStreets)))
 	mux.Handle("GET /admin/api/districts/{ubigeo}", s.auth(http.HandlerFunc(s.districtOverview)))
+	mux.Handle("GET /admin/api/districts/{ubigeo}/drawn", s.auth(http.HandlerFunc(s.drawnStreets)))
 	mux.Handle("POST /admin/api/streets", s.auth(http.HandlerFunc(s.drawStreet)))
 	mux.Handle("GET /admin/api/streets/{id}", s.auth(http.HandlerFunc(s.streetDetail)))
 	mux.Handle("POST /admin/api/streets/{id}/marks", s.auth(http.HandlerFunc(s.addEdit)))
@@ -339,6 +368,16 @@ func (s *Server) drawStreet(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger.Info("edición manual", "tipo", "streets", "id", id, "operador", op.Name)
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "note": "la calle entra al resolver con el snapshot siguiente"})
+}
+
+func (s *Server) drawnStreets(w http.ResponseWriter, r *http.Request) {
+	ms, err := s.store.ManualStreets(r.Context(), r.PathValue("ubigeo"))
+	if err != nil {
+		s.logger.Error("calles trazadas", "distrito", r.PathValue("ubigeo"), "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no se pudieron leer las calles trazadas"})
+		return
+	}
+	writeJSON(w, http.StatusOK, ms)
 }
 
 func (s *Server) removeEdit(w http.ResponseWriter, r *http.Request) {

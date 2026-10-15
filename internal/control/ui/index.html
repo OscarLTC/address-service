@@ -275,7 +275,7 @@ function setMode(m) {
   $('#mode').textContent = m === 'review' ? 'Editor de calles' : 'Cola de revisión';
   $('#title').textContent = m === 'review' ? 'Cola de revisión' : 'Editor de calles';
   current = null; pin = null; if (marker) { marker.remove(); marker = null; }
-  for (const s of ['district', 'streets', 'suggested', 'reference', 'ed-blocks', 'ed-anchors', 'ed-draw', 'ed-district', 'ed-district-anchors']) if (map.getSource(s)) map.getSource(s).setData(empty);
+  for (const s of ['district', 'streets', 'suggested', 'reference', 'ed-drawn', 'ed-blocks', 'ed-anchors', 'ed-draw', 'ed-district', 'ed-district-anchors']) if (map.getSource(s)) map.getSource(s).setData(empty);
   clearLabels(); edStreet = null; drawPts = [];
   $('#detail').replaceChildren(el('p', { class: 'muted' }, m === 'review' ? 'Elige un ticket de la cola.' : 'Busca una calle y elígela. Las que no tienen números de puerta salen primero.'));
   if (m === 'review') loadQueue(); else loadOverview(true);
@@ -372,13 +372,14 @@ async function finishDraw() {
     body: JSON.stringify({ ubigeo: $('#edUbigeo').value.trim(), street_type: type, name, line: drawPts }) });
   if (!r.ok) { alert(r.body.error || 'Error'); return; }
   drawPts = []; map.getSource('ed-draw').setData(empty); $('#edFinish').textContent = 'Terminar trazo';
-  $('#detail').replaceChildren(el('p', { class: 'ok' }, `Calle "${name}" guardada. Entra al mapa y al resolver cuando se publique el snapshot siguiente.`));
+  await loadDrawn(); edStreet = null; renderOverview();
+  $('#detail').prepend(el('p', { class: 'ok' }, `Calle "${name}" guardada: es la línea morada punteada. Entra al resolver cuando se publique el snapshot siguiente.`));
 }
 
 // Vista general del distrito: todas las calles pintadas según lo que ya se sabe.
 const COVERAGE_COLOR = { completa: '#1a7f37', parcial: '#e16f24', sin_datos: '#d1242f' };
 const COVERAGE_TEXT = { completa: 'todas las cuadras numeradas', parcial: 'numeración parcial', sin_datos: 'sin ningún dato' };
-let overview = null;
+let overview = null, drawn = [];
 
 map.on('load', () => {
   map.addSource('ed-district', { type: 'geojson', data: empty });
@@ -386,6 +387,9 @@ map.on('load', () => {
   map.addSource('ed-district-anchors', { type: 'geojson', data: empty });
   map.addLayer({ id: 'ed-district-anchors', type: 'circle', source: 'ed-district-anchors', minzoom: 15,
     paint: { 'circle-radius': 3, 'circle-color': '#1f6feb', 'circle-stroke-width': 1, 'circle-stroke-color': '#fff' } }, 'ed-blocks');
+  // Calles trazadas a mano: se ven apenas se guardan, antes de entrar al snapshot.
+  map.addSource('ed-drawn', { type: 'geojson', data: empty });
+  map.addLayer({ id: 'ed-drawn', type: 'line', source: 'ed-drawn', paint: { 'line-color': '#8250df', 'line-width': 4, 'line-dasharray': [2, 1] } });
   map.on('mouseenter', 'ed-district', () => { if (mode === 'editor') map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'ed-district', () => { map.getCanvas().style.cursor = ''; });
 });
@@ -403,7 +407,14 @@ async function loadOverview(fitMap) {
     body.streets.forEach(s => s.lines.forEach(l => l.forEach(c => bounds.extend(c))));
     if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 30 });
   }
+  await loadDrawn();
   if (!edStreet) renderOverview();
+}
+
+async function loadDrawn() {
+  const { ok, body } = await api('/admin/api/districts/' + encodeURIComponent($('#edUbigeo').value.trim()) + '/drawn');
+  drawn = ok && Array.isArray(body) ? body : [];
+  map.getSource('ed-drawn').setData({ type: 'FeatureCollection', features: drawn.map(d => ({ type: 'Feature', properties: { id: d.id }, geometry: d.geometry })) });
 }
 
 function renderOverview() {
@@ -413,7 +424,10 @@ function renderOverview() {
     el('h2', {}, `Distrito ${o.ubigeo}: ${total} calles, ${anchors} números de puerta`),
     el('div', { class: 'row' }, ...Object.keys(COVERAGE_TEXT).map(k => el('span', { class: 'badge', style: `border-color:${COVERAGE_COLOR[k]};color:${COVERAGE_COLOR[k]}` },
       `${sum[k] || 0} calles con ${COVERAGE_TEXT[k]}`))),
-    el('p', { class: 'muted' }, 'Haz clic en una calle del mapa para ver sus cuadras y editarla. Acerca el mapa para ver los números de puerta (puntos azules).'));
+    el('p', { class: 'muted' }, 'Haz clic en una calle del mapa para ver sus cuadras y editarla. Acerca el mapa para ver los números de puerta (puntos azules).'),
+    drawn.length ? el('div', {}, el('div', { class: 'row' }, 'Calles trazadas a mano (línea morada punteada; entran al resolver con el snapshot siguiente):'),
+      ...drawn.map(d => el('div', { class: 'row' }, el('span', { class: 'badge' }, `${d.street_type} ${d.name}`.trim()), ` ${d.created_by}, ${new Date(d.created_at).toLocaleString()} `,
+        el('a', { href: '#', onclick: async (e) => { e.preventDefault(); const r = await api(`/admin/api/edits/streets/${d.id}`, { method: 'DELETE' }); if (!r.ok) alert(r.body.error || 'Error'); await loadDrawn(); renderOverview(); } }, 'quitar')))) : '');
 }
 
 // Un clic sobre otra calle la elige; sobre la calle elegida (o fuera) aplica la herramienta.
