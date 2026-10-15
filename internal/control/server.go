@@ -11,12 +11,14 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
+	"addrsvc/internal/geo"
 	"addrsvc/internal/normalizer"
 	"addrsvc/internal/resolver"
 )
@@ -82,9 +84,22 @@ func operatorOf(r *http.Request) Operator {
 	return op
 }
 
+// auditThreshold es, por nivel de precisión, la distancia a la coordenada de
+// referencia desde la que una respuesta aceptada cuenta como error (cmd/geoeval).
+var auditThreshold = map[string]float64{
+	resolver.AddressPoint: 50, resolver.SegmentInterpolated: 50, resolver.Street: 150, resolver.Zone: 300,
+}
+
 // importCSV resuelve un CSV de direcciones y manda a la cola las que quedan en
-// revisión. Columnas reconocidas: external_id, address (o direccion), number (o
-// numero), reference, district (o distrito), province, department, ubigeo.
+// revisión. Columnas reconocidas: external_id (o id), address (o direccion o
+// raw_address), number (o numero), reference, district (o distrito o
+// district_field), province, department, ubigeo.
+//
+// Si el CSV trae una coordenada de referencia (lat y lng, o lat_verified y
+// lng_verified, como el dataset de GPS de cmd/gpsimport) es una auditoría: a la
+// cola van solo los AUTO_ACCEPT que quedan fuera del umbral de su precisión, con
+// el punto de referencia para compararlo en el mapa. Las filas de la partición test
+// se omiten: un pin sobre ellas entraría al snapshot y contaminaría la medición.
 func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	cr := csv.NewReader(r.Body)
@@ -106,12 +121,19 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		}
 		return ""
 	}
-	if _, ok := col["address"]; !ok {
-		if _, ok := col["direccion"]; !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "falta la columna address (o direccion)"})
-			return
+	has := func(names ...string) bool {
+		for _, n := range names {
+			if _, ok := col[n]; ok {
+				return true
+			}
 		}
+		return false
 	}
+	if !has("address", "direccion", "raw_address") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "falta la columna address (o direccion)"})
+		return
+	}
+	audit := has("lat", "lat_verified") && has("lng", "lng_verified")
 	op := operatorOf(r)
 	stats := map[string]int{}
 	// Con ?format=csv se devuelve cada fila con su resultado: reemplaza el proceso
@@ -134,16 +156,40 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req := normalizer.Request{
-			Address: pick(rec, "address", "direccion"), Number: pick(rec, "number", "numero"),
-			Reference: pick(rec, "reference", "referencia"), District: pick(rec, "district", "distrito"),
-			Province: pick(rec, "province", "provincia"), Department: pick(rec, "department", "departamento"),
+			Address: pick(rec, "address", "direccion", "raw_address"), Number: pick(rec, "number", "numero"),
+			Reference: pick(rec, "reference", "referencia"), District: pick(rec, "district", "distrito", "district_field"),
+			Province: pick(rec, "province", "provincia", "province_field"), Department: pick(rec, "department", "departamento", "department_field"),
 			Ubigeo: pick(rec, "ubigeo"),
+		}
+		externalID := pick(rec, "external_id", "id")
+		if audit && pick(rec, "split") == "test" {
+			stats["omitidas_test"]++
+			continue
 		}
 		stats["total"]++
 		res := s.resolver.Geocode(req)
 		stats[res.Decision]++
-		if res.Decision != resolver.Review {
-			writeRow(out, pick(rec, "external_id"), req, res, 0)
+		cands := map[string]any{"reason": reasonOf(res), "candidates": res.Candidates, "suggested": res.Location, "precision": res.PrecisionLevel, "flags": res.Flags}
+		if audit {
+			lat, err1 := strconv.ParseFloat(pick(rec, "lat", "lat_verified"), 64)
+			lng, err2 := strconv.ParseFloat(pick(rec, "lng", "lng_verified"), 64)
+			limit, judged := auditThreshold[res.PrecisionLevel]
+			if err1 != nil || err2 != nil || res.Decision != resolver.AutoAccept || res.Location == nil || !judged {
+				writeRow(out, externalID, req, res, 0)
+				continue
+			}
+			d := resolver.Distance(geo.Point{lng, lat}, geo.Point{res.Location.Lng, res.Location.Lat})
+			if d <= limit {
+				stats["auditoria_ok"]++
+				writeRow(out, externalID, req, res, 0)
+				continue
+			}
+			stats["auditoria_error"]++
+			cands["reason"] = "REFERENCE_DISAGREES"
+			cands["reference"] = map[string]any{"lat": lat, "lng": lng, "distance_m": math.Round(d),
+				"method": pick(rec, "verification_method"), "decision": res.Decision}
+		} else if res.Decision != resolver.Review {
+			writeRow(out, externalID, req, res, 0)
 			continue
 		}
 		key := res.Normalized.MatchKey + "|" + res.Ubigeo
@@ -152,9 +198,9 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		}
 		ticketID, created, err := s.store.UpsertTicket(r.Context(), NewTicket{
 			AddressKey: key, Ubigeo: res.Ubigeo,
-			Raw:        map[string]any{"external_id": pick(rec, "external_id"), "address": req.Address, "number": req.Number, "reference": req.Reference, "district": req.District, "province": req.Province, "ubigeo": req.Ubigeo},
+			Raw:        map[string]any{"external_id": externalID, "address": req.Address, "number": req.Number, "reference": req.Reference, "district": req.District, "province": req.Province, "ubigeo": req.Ubigeo},
 			Parse:      res.Normalized,
-			Candidates: map[string]any{"reason": reasonOf(res), "candidates": res.Candidates, "suggested": res.Location, "precision": res.PrecisionLevel, "flags": res.Flags},
+			Candidates: cands,
 			Source:     "import:" + op.Name,
 		})
 		if err != nil {
@@ -167,7 +213,7 @@ func (s *Server) importCSV(w http.ResponseWriter, r *http.Request) {
 		} else {
 			stats["tickets_repetidos"]++
 		}
-		writeRow(out, pick(rec, "external_id"), req, res, ticketID)
+		writeRow(out, externalID, req, res, ticketID)
 	}
 	s.logger.Info("importación", "operador", op.Name, "total", stats["total"], "revision", stats[resolver.Review])
 	if out != nil {

@@ -708,7 +708,7 @@ func (b *builder) loadAliases(dsn string) (int, int, error) {
 			return 0, 0, err
 		}
 		if s := byID[int(id)]; s != nil {
-			s.Aliases = append(s.Aliases, alias)
+			s.Promoted = append(s.Promoted, alias)
 			total++
 		}
 	}

@@ -44,8 +44,11 @@ type Street struct {
 	Lines    [][]geo.Point
 	Anchors  []Anchor // ordenados por número
 	Refs     []string // ways de OSM de origen
-	// Aliases son claves (txt.Key) de grafías promovidas por operadores.
+	// Aliases son claves (txt.Key) de otros nombres de la calle en OSM (alt_name,
+	// old_name, official_name, short_name).
 	Aliases []string
+	// Promoted son claves (txt.Key) de grafías promovidas por operadores.
+	Promoted []string
 	// Crossings son los cruces con otras calles: delimitan las cuadras.
 	Crossings []geo.Point
 	// Marks son las cuadras numeradas a mano por operadores.

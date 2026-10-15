@@ -3,6 +3,12 @@
 //
 //   - Una entrega es válida si su punto está a maxArrivalGap o menos del punto de
 //     "Llegada a Punto" del mismo pedido y cae dentro del distrito del pedido.
+//   - No es válida si su punto es idéntico al de la llegada (a menos de
+//     minArrivalGap): las dos marcas salieron de una misma lectura, en general
+//     hechas juntas lejos de la puerta, y la llegada deja de servir de control.
+//   - Tampoco si se marcó en lote: el mismo día, a maxBatchDistance o menos, hay
+//     maxBatch o más entregas de otras direcciones. Es el motorizado cerrando
+//     varios pedidos desde un mismo sitio.
 //   - Una dirección es "oro" si tiene al menos dos entregas válidas en días distintos
 //     que coinciden (a maxClusterSpread o menos de su punto central).
 //   - Con una sola entrega válida es "plata".
@@ -18,7 +24,13 @@ import (
 
 const (
 	maxArrivalGap    = 50.0
+	minArrivalGap    = 1.0
 	maxClusterSpread = 30.0
+	// Con las entregas plata que un operador revisó en el admin, la regla de
+	// llegada idéntica o lote descarta 6 de 9 con el GPS equivocado y el 3 % de las
+	// que coinciden con el resolver a 50 m o menos.
+	maxBatch         = 3
+	maxBatchDistance = 30.0
 )
 
 // Calidades de una coordenada de verdad.
@@ -32,6 +44,9 @@ type Delivery struct {
 	Day     string // fecha (YYYY-MM-DD)
 	Point   geo.Point
 	Arrival *geo.Point // punto de "Llegada a Punto", si existe
+	// Batch es cuántas entregas a otras direcciones se marcaron el mismo día a
+	// maxBatchDistance o menos (lo calcula quien arma las direcciones: BatchCounts).
+	Batch int
 }
 
 // Address agrupa las entregas a una misma dirección normalizada.
@@ -64,6 +79,10 @@ func Resolve(a Address, districts Locator) Result {
 			reasons["sin_llegada"]++
 		case geo.DistanceM(d.Point, *d.Arrival) > maxArrivalGap:
 			reasons["lejos_de_la_llegada"]++
+		case geo.DistanceM(d.Point, *d.Arrival) < minArrivalGap:
+			reasons["llegada_identica"]++
+		case d.Batch >= maxBatch:
+			reasons["marcada_en_lote"]++
 		case !inDistrict(districts, d.Point, a.Ubigeo):
 			reasons["fuera_del_distrito"]++
 		default:
@@ -85,6 +104,28 @@ func Resolve(a Address, districts Locator) Result {
 		return Result{Point: center, Quality: Gold, Reason: "entregas_coinciden_en_dias_distintos", Valid: len(valid)}
 	}
 	return Result{Point: center, Quality: Silver, Reason: "una_sola_fecha", Valid: len(valid)}
+}
+
+// BatchCounts devuelve, para cada entrega, cuántas entregas de otras direcciones
+// se marcaron el mismo día a maxBatchDistance o menos. groups[i] es la dirección
+// de la entrega i.
+func BatchCounts(ds []Delivery, groups []string) []int {
+	byDay := map[string][]int{}
+	for i, d := range ds {
+		byDay[d.Day] = append(byDay[d.Day], i)
+	}
+	out := make([]int, len(ds))
+	for _, idx := range byDay {
+		for a, i := range idx {
+			for _, j := range idx[a+1:] {
+				if groups[i] != groups[j] && geo.DistanceM(ds[i].Point, ds[j].Point) <= maxBatchDistance {
+					out[i]++
+					out[j]++
+				}
+			}
+		}
+	}
+	return out
 }
 
 func inDistrict(l Locator, p geo.Point, ubigeo string) bool {

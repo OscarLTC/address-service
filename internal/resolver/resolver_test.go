@@ -208,10 +208,29 @@ func TestPromotedAlias(t *testing.T) {
 	norm := normalizer.New(cat, lex, normalizer.Options{ActiveZones: map[string]bool{"LIMA_METRO": true}})
 	s := street(1, "150116", "AVENIDA", "LAS PALMERAS", [][]geo.Point{{{-77.0400, -12.0800}, {-77.0390, -12.0800}}},
 		a(100, -77.0400, -12.0800), a(120, -77.0398, -12.0800))
-	s.Aliases = []string{txt.Key("PALMERAS REALES")}
+	s.Promoted = []string{txt.Key("PALMERAS REALES")}
 	r := resolver.New(norm, &snapshot.Snapshot{Format: snapshot.FormatVersion, Version: "test", Streets: []snapshot.Street{s}}, nil)
 	got := r.Geocode(normalizer.Request{Address: "Av. Palmeras Reales 120", District: "Lince"})
 	if got.ResolutionType != "ALIAS" || got.StreetID != 1 || got.Decision != resolver.AutoAccept {
 		t.Errorf("se esperaba el alias promovido: %s %d %s", got.ResolutionType, got.StreetID, got.Decision)
+	}
+}
+
+// Un nombre de OSM que es una grafía del canónico vale como él; uno distinto (un
+// old_name que puede ser de otra calle) va a revisión.
+func TestOSMAliases(t *testing.T) {
+	root := filepath.Join("..", "..", "data")
+	cat, _ := catalog.Load(filepath.Join(root, "catalog", "ubigeos.json"))
+	lex, _ := normalizer.LoadLexicon(filepath.Join(root, "rules", "lexicon.json"))
+	norm := normalizer.New(cat, lex, normalizer.Options{ActiveZones: map[string]bool{"LIMA_METRO": true}})
+	s := street(1, "150116", "CALLE", "LOS ALCANFORES", [][]geo.Point{{{-77.0400, -12.0800}, {-77.0390, -12.0800}}},
+		a(100, -77.0400, -12.0800), a(120, -77.0398, -12.0800))
+	s.Aliases = []string{txt.Key("ALCAFORES"), txt.Key("TUDELA Y VARELA")}
+	r := resolver.New(norm, &snapshot.Snapshot{Format: snapshot.FormatVersion, Version: "test", Streets: []snapshot.Street{s}}, nil)
+	if got := r.Geocode(normalizer.Request{Address: "Calle Alcafores 120", District: "Lince"}); got.ResolutionType != "ALIAS" || got.Decision != resolver.AutoAccept {
+		t.Errorf("la grafía debe valer como el nombre: %s %s", got.ResolutionType, got.Decision)
+	}
+	if got := r.Geocode(normalizer.Request{Address: "Calle Tudela y Varela 120", District: "Lince"}); got.ResolutionType != "OSM_OTHER_NAME" || got.Decision != resolver.Review {
+		t.Errorf("otro nombre debe ir a revisión: %s %s", got.ResolutionType, got.Decision)
 	}
 }

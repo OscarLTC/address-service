@@ -69,9 +69,11 @@ type Candidate struct {
 type districtIndex struct {
 	byKey   map[string][]*snapshot.Street
 	byAlias map[string][]*snapshot.Street
-	byPhon  map[string][]*snapshot.Street
-	byToken map[string][]*snapshot.Street
-	areas   map[string]*snapshot.Area
+	// byOtherName son los nombres de OSM que no son una variante del canónico.
+	byOtherName map[string][]*snapshot.Street
+	byPhon      map[string][]*snapshot.Street
+	byToken     map[string][]*snapshot.Street
+	areas       map[string]*snapshot.Area
 }
 
 // Resolver es seguro para uso concurrente: no muta estado después de New.
@@ -95,7 +97,7 @@ func New(norm *normalizer.Normalizer, snap *snapshot.Snapshot, centroids map[str
 	idx := func(u string) *districtIndex {
 		d := r.districts[u]
 		if d == nil {
-			d = &districtIndex{byKey: map[string][]*snapshot.Street{}, byAlias: map[string][]*snapshot.Street{}, byPhon: map[string][]*snapshot.Street{},
+			d = &districtIndex{byKey: map[string][]*snapshot.Street{}, byAlias: map[string][]*snapshot.Street{}, byOtherName: map[string][]*snapshot.Street{}, byPhon: map[string][]*snapshot.Street{},
 				byToken: map[string][]*snapshot.Street{}, areas: map[string]*snapshot.Area{}}
 			r.districts[u] = d
 		}
@@ -107,8 +109,15 @@ func New(norm *normalizer.Normalizer, snap *snapshot.Snapshot, centroids map[str
 		r.byID[s.ID] = s
 		d := idx(s.Ubigeo)
 		d.byKey[s.Key] = append(d.byKey[s.Key], s)
-		for _, a := range s.Aliases {
+		for _, a := range s.Promoted {
 			d.byAlias[a] = append(d.byAlias[a], s)
+		}
+		for _, a := range s.Aliases {
+			if sameName(a, s.Key) {
+				d.byAlias[a] = append(d.byAlias[a], s)
+			} else {
+				d.byOtherName[a] = append(d.byOtherName[a], s)
+			}
 		}
 		d.byPhon[s.Phonetic] = append(d.byPhon[s.Phonetic], s)
 		for _, t := range strings.Fields(s.Key) {
@@ -238,9 +247,16 @@ func (r *Resolver) candidates(d *districtIndex, typ, name string) []candidate {
 	for _, s := range d.byKey[key] {
 		add(s, 1.0, "EXACT")
 	}
-	// Alias promovido por operadores: tan confiable como el nombre canónico.
+	// Alias promovido por operadores, o grafía de OSM del mismo nombre: tan
+	// confiable como el nombre canónico.
 	for _, s := range d.byAlias[key] {
 		add(s, 0.995, "ALIAS")
+	}
+	// Otro nombre de OSM (en general old_name): los nombres viejos se reusan en
+	// otras calles del distrito. Contra el GPS de entrega fallaban la mitad de las
+	// veces, a cientos de metros o kilómetros: va a revisión.
+	for _, s := range d.byOtherName[key] {
+		add(s, otherNameScore, "OSM_OTHER_NAME")
 	}
 	for _, s := range d.byPhon[phon] {
 		add(s, 0.93, "PHONETIC")
@@ -281,6 +297,52 @@ func (r *Resolver) candidates(d *districtIndex, typ, name string) []candidate {
 // partialScore es el puntaje de una calle cuyo nombre contiene al buscado o está
 // contenido en él: alcanza para aceptar con marca, nunca para AUTO_ACCEPT.
 const partialScore = 0.88
+
+// otherNameScore es el puntaje de una calle encontrada por otro nombre de OSM: no
+// alcanza para aceptar.
+const otherNameScore = 0.75
+
+// sameName indica si dos claves son grafías del mismo nombre: las palabras de una
+// están en la otra, iguales o con a lo más una letra de diferencia ("DALIAS" y "LOS
+// DALIAS", "ALCAFORES" y "ALCANFORES", "ROCA Y BOLOGNA" y "ROCA Y BOLOÑA").
+func sameName(a, b string) bool {
+	wa, wb := strings.Fields(txt.NoEnye(a)), strings.Fields(txt.NoEnye(b))
+	if len(wa) > len(wb) {
+		wa, wb = wb, wa
+	}
+	if len(wa) == 0 {
+		return false
+	}
+	for _, x := range wa {
+		found := false
+		for _, y := range wb {
+			found = found || x == y || (len(x) >= 4 && oneEdit(x, y))
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// oneEdit indica si a y b difieren en a lo más una letra (cambio, inserción o
+// borrado).
+func oneEdit(a, b string) bool {
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	if len(b)-len(a) > 1 {
+		return false
+	}
+	i := 0
+	for i < len(a) && a[i] == b[i] {
+		i++
+	}
+	if len(a) == len(b) {
+		return a[i+1:] == b[i+1:]
+	}
+	return a[i:] == b[i+1:]
+}
 
 // subset indica si todas las palabras de a están en b.
 func subset(a, b []string) bool {

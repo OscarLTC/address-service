@@ -114,6 +114,9 @@ map.on('load', () => {
   map.addLayer({ id: 'streets', type: 'line', source: 'streets', paint: { 'line-color': ['case', ['==', ['get', 'street_id'], ['literal', -1]], '#d1242f', '#e16f24'], 'line-width': 5, 'line-opacity': .8 } });
   map.addSource('suggested', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'suggested', type: 'circle', source: 'suggested', paint: { 'circle-radius': 6, 'circle-color': '#8250df', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
+  // Coordenada de referencia de un ticket de auditoría (GPS de entrega).
+  map.addSource('reference', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'reference', type: 'circle', source: 'reference', paint: { 'circle-radius': 7, 'circle-color': '#24292f', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' } });
 });
 map.on('click', (e) => { if (mode === 'editor') return editorClick(e); if (current) setPin(e.lngLat.lat, e.lngLat.lng); });
 // Clic derecho: abre Street View en ese punto, siempre en la misma pestaña, para
@@ -168,6 +171,8 @@ async function open(id) {
   if (marker) { marker.remove(); marker = null; }
   map.getSource('district').setData(body.district_geojson ? { type: 'Feature', geometry: body.district_geojson, properties: {} } : { type: 'FeatureCollection', features: [] });
   map.getSource('streets').setData(body.streets_geojson || { type: 'FeatureCollection', features: [] });
+  const ref = body.candidates && body.candidates.reference;
+  map.getSource('reference').setData(ref ? { type: 'Feature', geometry: { type: 'Point', coordinates: [ref.lng, ref.lat] }, properties: {} } : { type: 'FeatureCollection', features: [] });
   showSuggestion();
   fit(body);
   render(); loadQueue();
@@ -190,6 +195,9 @@ function render() {
     el('h2', {}, (t.raw_input && t.raw_input.address) || ''),
     el('div', { class: 'muted' }, 'Normalizada: ', el('code', {}, p.normalized || '—'), ' · ', t.district || 'sin distrito', ' · prioridad ', String(t.priority)),
     el('div', { class: 'muted' }, 'Motivo: ', (t.candidates && t.candidates.reason) || '', ' · flags: ', ((t.candidates && t.candidates.flags) || []).join(', ')),
+    t.candidates && t.candidates.reference ? el('div', { class: 'row warn' },
+      `Auditoría: el resolver respondió ${t.candidates.reference.decision} a ${t.candidates.reference.distance_m} m de la referencia (punto negro, ${t.candidates.reference.method || 'sin método'}). Pon el pin en la puerta real: puede ser el error del resolver o de la referencia. `,
+      el('a', { href: streetView(t.candidates.reference), target: '_blank', rel: 'noopener' }, 'Ver la referencia')) : '',
     el('div', { class: 'row' }, 'Vía: ', [c.street_type, c.street_name, c.number].filter(Boolean).join(' ') || '—',
       c.block || c.lot ? ` · Mz ${c.block || '—'} Lt ${c.lot || '—'}` : '', c.urbanization ? ' · ' + c.urbanization : '', c.reference ? ' · Ref: ' + c.reference : ''),
     el('div', { class: 'row' }, cand.length ? 'Calles candidatas (elige una):' : 'Sin calles candidatas.'),
@@ -267,7 +275,7 @@ function setMode(m) {
   $('#mode').textContent = m === 'review' ? 'Editor de calles' : 'Cola de revisión';
   $('#title').textContent = m === 'review' ? 'Cola de revisión' : 'Editor de calles';
   current = null; pin = null; if (marker) { marker.remove(); marker = null; }
-  for (const s of ['district', 'streets', 'suggested', 'ed-blocks', 'ed-anchors', 'ed-draw', 'ed-district', 'ed-district-anchors']) if (map.getSource(s)) map.getSource(s).setData(empty);
+  for (const s of ['district', 'streets', 'suggested', 'reference', 'ed-blocks', 'ed-anchors', 'ed-draw', 'ed-district', 'ed-district-anchors']) if (map.getSource(s)) map.getSource(s).setData(empty);
   clearLabels(); edStreet = null; drawPts = [];
   $('#detail').replaceChildren(el('p', { class: 'muted' }, m === 'review' ? 'Elige un ticket de la cola.' : 'Busca una calle y elígela. Las que no tienen números de puerta salen primero.'));
   if (m === 'review') loadQueue(); else loadOverview(true);
@@ -427,7 +435,7 @@ $('#status').onchange = loadQueue;
 $('#sort').onchange = loadQueue;
 async function download(path, opts, name) {
   const res = await fetch(path, { ...opts, headers: { 'X-Admin-Token': token, ...((opts && opts.headers) || {}) } });
-  if (!res.ok) { alert('Error ' + res.status); return; }
+  if (!res.ok) { const b = await res.json().catch(() => ({})); alert(b.error || 'Error ' + res.status); return; }
   const a = el('a', { href: URL.createObjectURL(await res.blob()), download: name });
   document.body.append(a); a.click(); a.remove();
 }

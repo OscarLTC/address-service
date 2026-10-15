@@ -84,13 +84,28 @@ func main() {
 		groups[k] = append(groups[k], d)
 	}
 
+	// Entregas marcadas en lote: se cuentan contra todas las direcciones del archivo.
+	var flat []truth.Delivery
+	var owner []string
+	for _, k := range order {
+		for _, d := range groups[k] {
+			flat = append(flat, truth.Delivery{Day: d.day, Point: d.point, Arrival: d.arrival})
+			owner = append(owner, k)
+		}
+	}
+	batch := truth.BatchCounts(flat, owner)
+
 	stats := map[string]int{}
 	var rows []golden.Row
+	next := 0
 	for _, k := range order {
 		g := groups[k]
 		addr := truth.Address{Key: k, Ubigeo: g[0].ubigeo}
-		for _, d := range g {
-			addr.Deliveries = append(addr.Deliveries, truth.Delivery{Day: d.day, Point: d.point, Arrival: d.arrival})
+		for range g {
+			d := flat[next]
+			d.Batch = batch[next]
+			addr.Deliveries = append(addr.Deliveries, d)
+			next++
 		}
 		res := truth.Resolve(addr, districts)
 		if res.Quality == "" {
