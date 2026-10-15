@@ -444,8 +444,11 @@ func locateOnStreet(s *snapshot.Street, number string, near *geo.Point, hints []
 		}
 		// Sin anclas del mismo lado que encierren el número, la cuadra lo ubica mejor
 		// que las anclas del otro lado o que extrapolar.
-		if p, ok := locateByBlocks(s, num); ok {
+		if p, sure, ok := locateByBlocks(s, num); ok && sure {
 			return location{point: p, precision: SegmentInterpolated, note: "BLOCK_RANGE"}
+		} else if ok {
+			// Cuadra deducida lejos de un dato: la calle es segura, la cuadra no.
+			return location{point: p, precision: Street, tight: streetSpan(s) <= maxStreetSpan, note: "BLOCK_SEQUENCE_FAR"}
 		}
 		if l, ok := interpolate(s.Anchors, num, false); ok {
 			l.tight = false // del otro lado de la calle
@@ -456,7 +459,7 @@ func locateOnStreet(s *snapshot.Street, number string, near *geo.Point, hints []
 	if err == nil && len(hints) > 0 {
 		borrowed := *s
 		borrowed.Anchors = hints
-		if p, ok := locateByBlocks(&borrowed, num); ok {
+		if p, _, ok := locateByBlocks(&borrowed, num); ok {
 			return location{point: p, precision: Street, tight: streetSpan(s) <= maxStreetSpan, note: "PARALLEL_BLOCKS"}
 		}
 	}

@@ -15,6 +15,11 @@ const (
 	maxBlockSpread = 8
 	// markWeight hace que la marca de un operador pese más que cualquier ancla.
 	markWeight = 1000
+	// maxSureSequence es a cuántas cuadras de una con dato la centena deducida en
+	// secuencia todavía ubica el número a nivel de cuadra. Más lejos, un cruce de más
+	// o de menos en OSM corre la numeración: reservando un ancla, a 2 cuadras solo el
+	// 45 % queda a 50 m o menos, y a 3 o más, menos del 35 %.
+	maxSureSequence = 1
 )
 
 // Origen de la centena de una cuadra.
@@ -34,7 +39,16 @@ type blockModel struct {
 	hund   []int
 	source []string // "" si la cuadra no tiene centena
 	dir    int      // +1 si la numeración crece con la progresiva, -1 si decrece, 0 si no se sabe
+	// inBlock son las anclas de cada cuadra cuya centena es la de la cuadra, como
+	// puntos de control (número/100, progresiva).
+	inBlock [][]control
+	// gap es a cuántas cuadras está cada una de la cuadra con dato más cercana.
+	gap []int
 }
+
+// control es un punto de control de la numeración: x es el número dividido por
+// 100 y c, su progresiva sobre el eje.
+type control struct{ x, c float64 }
 
 // newBlockModel arma las cuadras de la calle. Devuelve nil si no hay con qué
 // numerarlas: hacen falta cruces y anclas, o al menos una marca de operador.
@@ -130,6 +144,19 @@ func newBlockModel(s *snapshot.Street) *blockModel {
 			m.dir = -1
 		}
 	}
+	m.gap = make([]int, n)
+	for j := range m.gap {
+		m.gap[j] = n
+		for _, v := range voted {
+			m.gap[j] = min(m.gap[j], max(j-v, v-j))
+		}
+	}
+	m.inBlock = make([][]control, n)
+	for _, an := range s.Anchors {
+		if j := blockOf(an.Point); m.source[j] != "" && an.Number/100 == m.hund[j] {
+			m.inBlock[j] = append(m.inBlock[j], control{float64(an.Number) / 100, a.chainage(an.Point)})
+		}
+	}
 	if m.dir == 0 {
 		return m
 	}
@@ -158,23 +185,25 @@ func newBlockModel(s *snapshot.Street) *blockModel {
 	return m
 }
 
-// locate ubica un número: dentro de su cuadra en proporción a sus dos últimas cifras
-// o, si su centena no cuadra con ninguna, interpolando entre las cuadras que lo
-// encierran.
-func (m *blockModel) locate(num int) (float64, bool) {
+// locate ubica un número y dice si la ubicación es segura a nivel de cuadra: lo es
+// dentro de una cuadra con dato o a maxSureSequence cuadras de una; no lo es entre
+// cuadras. Ubica dentro de su cuadra, interpolando entre los extremos de la
+// cuadra y las anclas que tenga (de cualquier lado: dicen dónde cae cada número
+// mejor que la proporción de sus dos últimas cifras) o, si su centena no cuadra con
+// ninguna, interpolando entre las cuadras que lo encierran.
+func (m *blockModel) locate(num int) (c float64, sure, ok bool) {
 	target := num / 100
 	if m.dir == 0 {
 		// Sin sentido conocido solo se puede decir en qué cuadra está.
 		for j := range m.hund {
 			if m.source[j] != "" && m.hund[j] == target {
-				return (m.bounds[j] + m.bounds[j+1]) / 2, true
+				return (m.bounds[j] + m.bounds[j+1]) / 2, true, true
 			}
 		}
-		return 0, false
+		return 0, false, false
 	}
 	// Cada cuadra numerada da dos puntos de control: su centena en un extremo y la
 	// siguiente en el otro.
-	type control struct{ x, c float64 }
 	var cps []control
 	for j := range m.hund {
 		if m.source[j] == "" {
@@ -185,7 +214,7 @@ func (m *blockModel) locate(num int) (float64, bool) {
 			from, to = to, from
 		}
 		if m.hund[j] == target {
-			return from + float64(num%100)/100*(to-from), true
+			return interpolateControls(append([]control{{float64(target), from}, {float64(target + 1), to}}, m.inBlock[j]...), float64(num)/100), m.gap[j] <= maxSureSequence, true
 		}
 		cps = append(cps, control{float64(m.hund[j]), from}, control{float64(m.hund[j] + 1), to})
 	}
@@ -193,22 +222,38 @@ func (m *blockModel) locate(num int) (float64, bool) {
 	x := float64(num) / 100
 	for i := 1; i < len(cps); i++ {
 		if lo, hi := cps[i-1], cps[i]; lo.x <= x && x <= hi.x && hi.x > lo.x {
-			return lo.c + (x-lo.x)/(hi.x-lo.x)*(hi.c-lo.c), true
+			return lo.c + (x-lo.x)/(hi.x-lo.x)*(hi.c-lo.c), false, true
 		}
 	}
-	return 0, false
+	return 0, false, false
+}
+
+// interpolateControls interpola linealmente la progresiva de x entre los puntos de
+// control que lo encierran. Los dos primeros son los extremos de la cuadra y siempre
+// lo encierran.
+func interpolateControls(cps []control, x float64) float64 {
+	sort.SliceStable(cps, func(i, j int) bool { return cps[i].x < cps[j].x })
+	for i := 1; i < len(cps); i++ {
+		if lo, hi := cps[i-1], cps[i]; lo.x <= x && x <= hi.x {
+			if hi.x == lo.x {
+				return (lo.c + hi.c) / 2
+			}
+			return lo.c + (x-lo.x)/(hi.x-lo.x)*(hi.c-lo.c)
+		}
+	}
+	return cps[0].c
 }
 
 // locateByBlocks ubica un número con el modelo de cuadras, del lado de la calle que
-// le toca por su paridad.
-func locateByBlocks(s *snapshot.Street, num int) (geo.Point, bool) {
+// le toca por su paridad, y dice si la ubicación es segura a nivel de cuadra.
+func locateByBlocks(s *snapshot.Street, num int) (p geo.Point, sure, ok bool) {
 	m := newBlockModel(s)
 	if m == nil {
-		return geo.Point{}, false
+		return geo.Point{}, false, false
 	}
-	c, ok := m.locate(num)
+	c, sure, ok := m.locate(num)
 	if !ok {
-		return geo.Point{}, false
+		return geo.Point{}, false, false
 	}
-	return m.axis.toSide(m.axis.at(c), s.Anchors, num), true
+	return m.axis.toSide(m.axis.at(c), s.Anchors, num), sure, true
 }

@@ -171,9 +171,18 @@ func TestBlockRange(t *testing.T) {
 		s.Crossings = append(s.Crossings, geo.Point{lng, -12.0800})
 	}
 	r := resolver.New(norm, &snapshot.Snapshot{Format: snapshot.FormatVersion, Version: "test", Streets: []snapshot.Street{s}}, nil)
-	got := r.Geocode(normalizer.Request{Address: "Av. Las Palmeras 450", District: "Lince"})
+	// El 350 está a una cuadra de la última con anclas: se ubica a nivel de cuadra.
+	got := r.Geocode(normalizer.Request{Address: "Av. Las Palmeras 350", District: "Lince"})
 	if !contains(got.Flags, "BLOCK_RANGE") || got.PrecisionLevel != resolver.SegmentInterpolated || got.Decision != resolver.AcceptFlagged {
 		t.Fatalf("se esperaba la ubicación por cuadra: %s %s %v", got.PrecisionLevel, got.Decision, got.Flags)
+	}
+	if got.Location.Lng <= -77.0380 || got.Location.Lng >= -77.0370 {
+		t.Errorf("el 350 debe quedar en la tercera cuadra: %+v", got.Location)
+	}
+	// El 450, a dos: el punto sale del mismo modelo, pero la cuadra no es segura.
+	got = r.Geocode(normalizer.Request{Address: "Av. Las Palmeras 450", District: "Lince"})
+	if !contains(got.Flags, "BLOCK_SEQUENCE_FAR") || got.PrecisionLevel != resolver.Street {
+		t.Fatalf("se esperaba la cuadra deducida lejos del dato: %s %s %v", got.PrecisionLevel, got.Decision, got.Flags)
 	}
 	if got.Location.Lng <= -77.0370 || got.Location.Lng >= -77.0360 {
 		t.Errorf("el 450 debe quedar en la cuarta cuadra: %+v", got.Location)

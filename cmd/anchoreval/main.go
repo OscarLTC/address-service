@@ -1,7 +1,8 @@
 // Comando anchoreval: mide el error de ubicación del número sobre la calle reservando
 // anclas. Para cada cuadra con anclas (misma calle y misma centena) las quita todas,
 // ubica cada número con lo que queda y mide la distancia a su ancla. Es el caso de
-// una dirección en una cuadra de la que no se sabe nada.
+// una dirección en una cuadra de la que no se sabe nada. Con -hold anchor reserva
+// cada ancla sola: una dirección en una cuadra con otros números conocidos.
 //
 // Las anclas de OSM suelen estar en el centro del edificio, a 10-20 m del eje de la
 // calle: ese es el piso del error. No tienen verificación independiente (ADR 0005).
@@ -47,7 +48,7 @@ func main() {
 	ubigeo := flag.String("ubigeo", "", "distrito a medir (vacío: todos)")
 	noBlocks := flag.Bool("no-blocks", false, "ignora los cruces: mide sin el modelo de cuadras")
 	noHints := flag.Bool("no-parallel", false, "mide sin la numeración de las calles paralelas")
-	hold := flag.String("hold", "block", "qué se reserva: block (la cuadra) o street (todas las anclas de la calle)")
+	hold := flag.String("hold", "block", "qué se reserva: block (la cuadra), street (todas las anclas de la calle) o anchor (cada ancla sola)")
 	flag.Parse()
 
 	snap, err := snapshot.Load(*snapPath)
@@ -80,6 +81,21 @@ func main() {
 		if *hold == "street" {
 			hundreds = map[int]bool{-1: true}
 		}
+		if *hold == "anchor" {
+			for k, a := range s.Anchors {
+				rest := s
+				rest.Anchors = append(append([]snapshot.Anchor{}, s.Anchors[:k]...), s.Anchors[k+1:]...)
+				p, prec, note := resolver.Locate(&rest, strconv.Itoa(a.Number), hints[&snap.Streets[i]])
+				e := geo.DistanceM(p, a.Point)
+				key := prec
+				if note != "" {
+					key += " (" + note + ")"
+				}
+				by[key] = append(by[key], e)
+				all = append(all, e)
+			}
+			continue
+		}
 		for h := range hundreds {
 			rest := s
 			rest.Anchors = nil
@@ -104,8 +120,8 @@ func main() {
 		}
 	}
 
-	fmt.Printf("# Error de ubicación reservando la cuadra\n\n- Snapshot: `%s` (versión %s)\n- Distrito: %s\n- Calles con anclas: %d; anclas medidas: %d (%d en calles con una sola cuadra con anclas)\n\n",
-		*snapPath, snap.Version, orAll(*ubigeo), streets, len(all), alone)
+	fmt.Printf("# Error de ubicación reservando: %s\n\n- Snapshot: `%s` (versión %s)\n- Distrito: %s\n- Calles con anclas: %d; anclas medidas: %d (%d en calles con una sola cuadra con anclas)\n\n",
+		*hold, *snapPath, snap.Version, orAll(*ubigeo), streets, len(all), alone)
 	fmt.Printf("| Método | Anclas | Mediana | p75 | p90 | ≤ 50 m | ≤ 100 m | ≤ 150 m |\n|---|---:|---:|---:|---:|---:|---:|---:|\n")
 	keys := make([]string, 0, len(by))
 	for k := range by {
