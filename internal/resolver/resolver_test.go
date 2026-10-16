@@ -258,3 +258,25 @@ func TestMarksSplitBlock(t *testing.T) {
 		t.Errorf("el 250 debe quedar a la mitad de la cuadra 2: %v %s %s", p, prec, note)
 	}
 }
+
+// En el admin la base manda: una marca o un número puesto a mano que ya está en el
+// snapshot y que un operador quitó deja de contar sin esperar al snapshot siguiente.
+func TestEditsReplaceSnapshot(t *testing.T) {
+	root := filepath.Join("..", "..", "data")
+	cat, _ := catalog.Load(filepath.Join(root, "catalog", "ubigeos.json"))
+	lex, _ := normalizer.LoadLexicon(filepath.Join(root, "rules", "lexicon.json"))
+	norm := normalizer.New(cat, lex, normalizer.Options{ActiveZones: map[string]bool{"LIMA_METRO": true}})
+	manual := a(150, -77.0395, -12.0800)
+	manual.Ref = "manual:9"
+	s := street(1, "150116", "CALLE", "LAS PRUEBAS", [][]geo.Point{{{-77.0400, -12.0800}, {-77.0390, -12.0800}}}, a(100, -77.0400, -12.0800), manual)
+	s.Marks = []snapshot.BlockMark{{Hundred: 175, Point: geo.Point{-77.0398, -12.0800}}}
+	r := resolver.New(norm, &snapshot.Snapshot{Format: snapshot.FormatVersion, Version: "test", Streets: []snapshot.Street{s}}, nil)
+	d, ok := r.Detail(1, nil, nil)
+	if !ok || d.Marks != 0 || len(d.Anchors) != 1 {
+		t.Errorf("sin ediciones vigentes deben quedar 0 marcas y solo el ancla de OSM: %d marcas, %d anclas", d.Marks, len(d.Anchors))
+	}
+	d, _ = r.Detail(1, nil, []snapshot.BlockMark{{Hundred: 1, Point: geo.Point{-77.0398, -12.0800}}})
+	if d.Marks != 1 {
+		t.Errorf("la marca vigente de la base debe contar: %d", d.Marks)
+	}
+}

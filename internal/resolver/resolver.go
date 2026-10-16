@@ -509,8 +509,12 @@ func (r *Resolver) Suggest(streetID int, number string, extra []snapshot.Anchor,
 	return Suggestion{StreetID: streetID, Location: *toPoint(l.point), Precision: l.precision, How: l.note, Pins: len(extra)}, true
 }
 
-// withEdits copia una calle del snapshot y le suma las anclas y marcas de cuadra
-// que todavía no están en él. Un ancla nueva reemplaza a la del mismo número.
+// withEdits copia una calle del snapshot con las ediciones vigentes de la base:
+// extra son los números puestos a mano y los pines de operadores, marks las cuadras
+// marcadas. La base manda sobre el snapshot: los números puestos a mano y las marcas
+// del snapshot se reemplazan por los de la base, así lo que un operador quita deja
+// de contar sin esperar al snapshot siguiente. Un ancla nueva reemplaza a la del
+// mismo número.
 func (r *Resolver) withEdits(streetID int, extra []snapshot.Anchor, marks []snapshot.BlockMark) (snapshot.Street, bool) {
 	s := r.byID[streetID]
 	if s == nil {
@@ -523,13 +527,13 @@ func (r *Resolver) withEdits(streetID int, extra []snapshot.Anchor, marks []snap
 		replaced[a.Number] = true
 	}
 	for _, a := range s.Anchors {
-		if !replaced[a.Number] {
+		if !replaced[a.Number] && !strings.HasPrefix(a.Ref, "manual:") {
 			local.Anchors = append(local.Anchors, a)
 		}
 	}
 	local.Anchors = append(local.Anchors, extra...)
 	sort.Slice(local.Anchors, func(i, j int) bool { return local.Anchors[i].Number < local.Anchors[j].Number })
-	local.Marks = append(append([]snapshot.BlockMark{}, s.Marks...), marks...)
+	local.Marks = append([]snapshot.BlockMark{}, marks...)
 	return local, true
 }
 
